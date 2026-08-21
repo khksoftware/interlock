@@ -105,7 +105,10 @@ fi
 exec "$gate_python" -B -m {CLI_MODULE} "$@"
 """
 
-SPEC = GateSpec(marker_name=GATE_MARKER_NAME, hook_name=HOOK_NAME, shim=HOOK_SHIM)
+SPEC = GateSpec(
+    marker_name=GATE_MARKER_NAME, hook_name=HOOK_NAME, shim=HOOK_SHIM,
+    cli_module=CLI_MODULE, gate_label=GATE_LABEL,
+)
 
 
 def transaction_touches_stash_ref(phase: str, transaction_stdin: str) -> bool:

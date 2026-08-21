@@ -72,6 +72,13 @@ interlock install git.commit-message-pattern
 # git.stash-invocation is a separate, deliberate decision -- see docs/INTEGRATION.md.
 ```
 
+Three of those four share the `pre-commit` hook name, and git dispatches exactly one file
+per hook name -- `install` composes them onto it automatically, in whatever order you run
+them, rather than requiring you to know that ahead of time or refusing on the second one.
+`interlock status` afterward reports every one of them as installed and armed, not as a
+foreign hook occupying the name; see `docs/INTEGRATION.md` §5 for exactly what changes
+when the pre-existing occupant of a hook name is something this package did NOT write.
+
 Nothing above requires `interlock.turn` to be configured, imported, or even present.
 `interlock.git` never imports it, and the five gates it ships read only git's own state
 (the staged index, the proposed commit message, a ref-transaction batch) plus an optional
@@ -162,6 +169,10 @@ it.**
 hook this distribution ships, or for one given by id. Conflating "installed" with
 "therefore enforcing" is exactly the invisible gap arming exists to close; a status
 command that only reported one of the two facts would reintroduce it in a different form.
+"Installed" recognizes a gate whether it is the sole occupant of its hook name, composed
+onto that hook name alongside other interlock gates by `install` itself, or composed onto
+it by hand per `docs/INTEGRATION.md` §5 — a correctly-enforcing gate is never reported as
+a foreign hook merely because more than one gate shares its hook name.
 
 ### Naming a gate
 

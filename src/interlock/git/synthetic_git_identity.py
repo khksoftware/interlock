@@ -55,6 +55,8 @@ SPEC = GateSpec(
         marker_name=GATE_MARKER_NAME, hook_name=HOOK_NAME, cli_module=CLI_MODULE,
         gate_label=GATE_LABEL,
     ),
+    cli_module=CLI_MODULE,
+    gate_label=GATE_LABEL,
 )
 
 #: The IANA-reserved documentation/example domains (RFC 2606) plus `localhost`. Nothing real

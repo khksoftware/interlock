@@ -70,6 +70,127 @@ class TestThePredicate:
         assert staged_absolute_local_path_failures(sandbox) == ()
 
 
+class TestLineBreakEvasion:
+    """`REVIEW_2026-08-21.md` Finding 1: per-line scanning alone is defeated by an
+    ordinary line break -- a wrapped log paste, a hard-wrapped table cell. Re-measured
+    directly, the real evading break positions are: Windows drive path, 2 of 32 (both
+    inside the ``letter:separator`` sequence itself); POSIX ``/home/``, 10 of 30; POSIX
+    ``/Users/``, 11 of 31; UNC, 8 of 25 -- roughly a third for the three longer-prefix
+    forms. Position 1 (breaking right after the very first character) is one of the real
+    evading positions for all four forms and is used below as the representative,
+    previously-evading case each now has to be caught at."""
+
+    def test_a_windows_drive_path_split_right_after_the_bare_letter_is_caught(
+        self, sandbox: Path,
+    ) -> None:
+        full = r"C:\Users\jdoe\Desktop\secret.txt"
+        first, second = full[:1], full[1:]  # "C" / ":\Users\jdoe\Desktop\secret.txt"
+        (sandbox / "notes.md").write_text(first + "\n" + second + "\n", encoding="utf-8")
+        run_git(sandbox, "add", "notes.md")
+        failures = staged_absolute_local_path_failures(sandbox)
+        assert len(failures) == 1
+        assert "notes.md:1" in failures[0]
+        assert "line break" in failures[0]
+
+    def test_a_posix_home_path_split_right_after_the_leading_separator_is_caught(
+        self, sandbox: Path,
+    ) -> None:
+        full = "/home/jdoe/projects/secret.txt"
+        first, second = full[:1], full[1:]  # "/" / "home/jdoe/projects/secret.txt"
+        (sandbox / "notes.md").write_text(first + "\n" + second + "\n", encoding="utf-8")
+        run_git(sandbox, "add", "notes.md")
+        failures = staged_absolute_local_path_failures(sandbox)
+        assert len(failures) == 1
+        assert "notes.md:1" in failures[0]
+        assert "line break" in failures[0]
+
+    def test_a_posix_users_path_split_right_after_the_leading_separator_is_caught(
+        self, sandbox: Path,
+    ) -> None:
+        full = "/Users/jdoe/projects/secret.txt"
+        first, second = full[:1], full[1:]  # "/" / "Users/jdoe/projects/secret.txt"
+        (sandbox / "notes.md").write_text(first + "\n" + second + "\n", encoding="utf-8")
+        run_git(sandbox, "add", "notes.md")
+        failures = staged_absolute_local_path_failures(sandbox)
+        assert len(failures) == 1
+        assert "notes.md:1" in failures[0]
+        assert "line break" in failures[0]
+
+    def test_a_unc_path_split_right_after_the_leading_separator_is_caught(
+        self, sandbox: Path,
+    ) -> None:
+        full = r"\\server\share\secret.txt"
+        first, second = full[:1], full[1:]  # "\" / "\server\share\secret.txt"
+        (sandbox / "notes.md").write_text(first + "\n" + second + "\n", encoding="utf-8")
+        run_git(sandbox, "add", "notes.md")
+        failures = staged_absolute_local_path_failures(sandbox)
+        assert len(failures) == 1
+        assert "notes.md:1" in failures[0]
+        assert "line break" in failures[0]
+
+    def test_a_break_strictly_inside_a_path_segment_still_evades(self, sandbox: Path) -> None:
+        """Documented residual, not a bug: a break touching neither a separator nor a
+        colon on either side carries no signal that a path continues there, so the
+        narrow join-aware pass deliberately does not attempt it (see the module
+        docstring's "Line-break evasion" section)."""
+        full = "/home/jdoe/projects/secret.txt"
+        first, second = full[:3], full[3:]  # "/ho" / "me/jdoe/projects/secret.txt"
+        (sandbox / "notes.md").write_text(first + "\n" + second + "\n", encoding="utf-8")
+        run_git(sandbox, "add", "notes.md")
+        assert staged_absolute_local_path_failures(sandbox) == ()
+
+    def test_a_line_already_reported_per_line_is_not_also_reported_by_the_join_pass(
+        self, sandbox: Path,
+    ) -> None:
+        # Line 1 alone already embeds a complete path AND ends with a separator, so the
+        # join-aware pass's own boundary heuristic would also fire on it -- it must not
+        # produce a second finding for the same content.
+        (sandbox / "notes.md").write_text(
+            r"See C:\Users\jdoe\Desktop\\" + "\n" + "more unrelated prose continues here.\n",
+            encoding="utf-8",
+        )
+        run_git(sandbox, "add", "notes.md")
+        failures = staged_absolute_local_path_failures(sandbox)
+        assert len(failures) == 1
+        assert "notes.md:1" in failures[0]
+        assert "line break" not in failures[0]
+
+    def test_a_citation_also_exempts_a_spanning_match(self, sandbox: Path) -> None:
+        (sandbox / "notes.md").write_text(
+            "Historical citation: C\n:\\old\\path documented here\n", encoding="utf-8",
+        )
+        run_git(sandbox, "add", "notes.md")
+        failures = staged_absolute_local_path_failures(
+            sandbox, citations=({"path": "notes.md", "line_contains": "Historical"},),
+        )
+        assert failures == ()
+
+    def test_an_innocent_separator_boundary_with_no_second_separator_does_not_fire(
+        self, sandbox: Path,
+    ) -> None:
+        # "/home/" ends line 1 (a real separator boundary, so the join is attempted), but
+        # line 2 is ordinary prose with no second separator -- the pattern's own required
+        # skeleton is never completed, so this must not be flagged just because the join
+        # was attempted.
+        (sandbox / "notes.md").write_text(
+            "The shared directory lives at /home/\ngrown teams collaborate there daily.\n",
+            encoding="utf-8",
+        )
+        run_git(sandbox, "add", "notes.md")
+        assert staged_absolute_local_path_failures(sandbox) == ()
+
+    def test_an_innocent_drive_colon_boundary_does_not_fire(self, sandbox: Path) -> None:
+        # Line 2 starts with ":" for an unrelated reason (ordinary punctuation, not a
+        # drive letter's own colon) -- the join is attempted, but the colon is never
+        # immediately followed by a separator, so the pattern never completes.
+        (sandbox / "notes.md").write_text(
+            "If that fails, use Plan B\n: contact support directly for manual intervention.\n",
+            encoding="utf-8",
+        )
+        run_git(sandbox, "add", "notes.md")
+        assert staged_absolute_local_path_failures(sandbox) == ()
+
+
 class TestFromConfig:
     def test_reads_citations_and_deferred_scope_from_the_config_file(self, sandbox: Path) -> None:
         config = sandbox / "interlock.json"

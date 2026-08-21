@@ -38,7 +38,7 @@ from pathlib import Path
 from interlock import arming as shared_arming
 from interlock import registry
 from interlock.errors import GateError
-from interlock.git.hookkit import arm_marker, install, installed_hook_path, is_armed as git_is_armed
+from interlock.git.hookkit import arm_marker, install, installation_state, is_armed as git_is_armed
 from interlock.plumbing import working_tree_root
 from interlock.turn import arming as turn_arming
 
@@ -147,14 +147,9 @@ def _git_status_line(gate: registry.GitGateEntry, root: Path | None) -> str:
     if root is None:
         return f"{gate.id:<28} [git ] not inside a git working tree"
     try:
-        hook_path = installed_hook_path(root, gate.spec)
+        _, installed = installation_state(root, gate.spec)
     except GateError as error:
         return f"{gate.id:<28} [git ] {error}"
-    if not hook_path.is_file():
-        installed = "not installed"
-    else:
-        existing = hook_path.read_bytes().decode("utf-8", errors="replace")
-        installed = "installed" if existing == gate.spec.shim else "a FOREIGN hook occupies this name"
     armed = "armed" if git_is_armed(root, gate.spec) else "not armed"
     return f"{gate.id:<28} [git ] {installed}; {armed} in this worktree"
 

@@ -9,6 +9,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+from tests.conftest import run_git
+
 
 def run_cli(cwd: Path, *args: str) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
@@ -88,6 +90,53 @@ class TestTurnInstallAndArm:
         assert result.returncode == 0, result.stderr
         status = run_cli(sandbox, "status", "turn.idle-roster")
         assert "not armed" in status.stdout
+
+
+class TestReadmePath1Quickstart:
+    """`README.md`'s own "Path 1" quickstart prints four `interlock install` commands,
+    back to back, as the first-class adoption path for `interlock.git` alone. Three of
+    those five gates share the `pre-commit` hook name, so this hit a hard refusal on the
+    third line, every time, from a fresh repository (`REVIEW_2026-08-21.md` Finding 2),
+    and the gates that DID get wired by hand-composing around it were then misreported by
+    `status` as FOREIGN (Finding 3). This runs the four lines exactly as printed and
+    checks both are now fixed."""
+
+    def test_all_four_installs_succeed_in_the_printed_order(self, sandbox: Path) -> None:
+        for gate_id in (
+            "git.protected-paths", "git.absolute-local-path", "git.synthetic-git-identity",
+            "git.commit-message-pattern",
+        ):
+            result = run_cli(sandbox, "install", gate_id)
+            assert result.returncode == 0, f"{gate_id}: {result.stderr}"
+
+        status = run_cli(sandbox, "status")
+        assert status.returncode == 0, status.stderr
+        for gate_id in (
+            "git.protected-paths", "git.absolute-local-path", "git.synthetic-git-identity",
+            "git.commit-message-pattern",
+        ):
+            line = next(line for line in status.stdout.splitlines() if line.startswith(gate_id))
+            assert "FOREIGN" not in line, line
+            assert "not armed" not in line, line
+
+    def test_the_composed_gates_still_refuse_real_bad_commits_afterward(
+        self, sandbox: Path,
+    ) -> None:
+        for gate_id in (
+            "git.protected-paths", "git.absolute-local-path", "git.synthetic-git-identity",
+            "git.commit-message-pattern",
+        ):
+            run_cli(sandbox, "install", gate_id)
+
+        (sandbox / "leak.md").write_text(r"C:\Users\jdoe\secret\notes" + "\n", encoding="utf-8")
+        run_git(sandbox, "add", "leak.md")
+        result = run_git(sandbox, "commit", "-q", "-m", "leaks an absolute path")
+        assert result.returncode != 0
+        run_git(sandbox, "reset", "-q", "leak.md")
+
+        (sandbox / "ok.md").write_text("nothing to see here\n", encoding="utf-8")
+        run_git(sandbox, "add", "ok.md")
+        assert run_git(sandbox, "commit", "-q", "-m", "an ordinary commit").returncode == 0
 
 
 class TestUnknownIdEveryVerb:

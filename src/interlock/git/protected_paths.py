@@ -69,6 +69,8 @@ SPEC = GateSpec(
         marker_name=GATE_MARKER_NAME, hook_name=HOOK_NAME, cli_module=CLI_MODULE,
         gate_label=GATE_LABEL,
     ),
+    cli_module=CLI_MODULE,
+    gate_label=GATE_LABEL,
 )
 
 

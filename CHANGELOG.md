@@ -8,7 +8,32 @@ reminding about, something it did not before) rather than only a Python API.
 
 ## [Unreleased]
 
-Nothing yet.
+Three fixes from an independent adversarial review (`REVIEW_2026-08-21.md`):
+
+- **Fixed: `absolute_local_path` was defeated by an ordinary line break.** Its predicate
+  scanned line by line only, so a path wrapped across two lines (a copy-pasted log, a
+  hard-wrapped table cell) passed with no signal at all. It now also re-scans each
+  adjacent line pair whose join point itself looks like a continuation of a path (a
+  separator or a drive colon), reporting a spanning match under the first line's number
+  and never double-reporting content already caught per line. This is a deliberately
+  narrow, join-aware repair, not a blanket whole-file join (which would itself produce
+  spurious refusals) — a break strictly inside a path segment, or a path wrapped across
+  three or more lines, can still evade; see the module's own docstring for the full,
+  honest account of what remains.
+- **Fixed: more than one `pre-commit` gate sharing that hook name was not a first-class
+  path.** `README.md`'s own "Path 1" quickstart lists four `interlock install` commands
+  back to back; three of them share `pre-commit`, and the second and third used to refuse
+  outright with no warning, from a fresh repository, every time. `install` now composes
+  automatically onto a hook name already occupied by another of this package's own gates
+  (never onto a genuinely foreign hook, which is still refused exactly as before) — see
+  `interlock.git.hookkit`'s own docstring for the design. `docs/INTEGRATION.md` §5 is
+  updated to describe this as the default, keeping the hand-composed alternative it
+  already documented as a still-supported escape hatch.
+- **Fixed: `interlock status` reported a correctly-enforcing, composed `pre-commit` hook
+  as a "FOREIGN hook."** Whether composed automatically by `install` or by hand per
+  `docs/INTEGRATION.md` §5, `status` now recognizes it as installed rather than
+  conflating "not byte-identical to one gate's own solo shim" with "not managed by this
+  package at all."
 
 ## [0.1.0] — initial unified release
 

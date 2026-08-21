@@ -102,8 +102,9 @@ python -B -m interlock.git.cli.check_protected_paths --install
 `arm_marker()` in `interlock.git.hookkit`, for the additive half on its own):
 
 1. Writes that gate's fixed shell shim into the shared hooks directory
-   (`git rev-parse --git-common-dir`/`hooks`), unless something else already occupies
-   that hook name — see §5 below if it does.
+   (`git rev-parse --git-common-dir`/`hooks`) — composing it onto whatever this package's
+   own other gates already put there, or refusing if something genuinely foreign occupies
+   that hook name; see §5 below either way.
 2. Writes a marker file into *this worktree's own* git directory
    (`git rev-parse --git-dir`) recording the interpreter to run the gate with.
 
@@ -132,31 +133,49 @@ it automatically as a side effect of installing anything else.
 ### 5. What to do when a `pre-commit` hook already exists
 
 Three of the five gates (`protected_paths`, `absolute_local_path`,
-`synthetic_git_identity`) use `pre-commit`. Git dispatches exactly one file per hook name,
-so if your repository already has a `pre-commit` hook, `install` **refuses rather than
-silently overwrites it**:
+`synthetic_git_identity`) use `pre-commit`, and git dispatches exactly one file per hook
+name — so more than one of them ends up sharing that name in any repository that arms all
+three. **`install` handles this itself: run each `interlock install git.<gate>` in any
+order, including the exact four-line sequence in `README.md`'s "Path 1," and every one
+succeeds.** The first gate onto `pre-commit` gets exactly its own solo shim, byte for
+byte, same as always; the second and any further gate compose onto it automatically,
+because this package recognizes its own already-installed content and has full authority
+to extend it. `interlock status` reports every composed gate as installed and armed, not
+as a foreign hook occupying the name (`REVIEW_2026-08-21.md`, Findings 2 and 3 — this
+section used to describe a refusal at this exact point, and it no longer happens for two
+or more of this package's own gates).
+
+**Composing is still refused, unconditionally, for a hook this package did not write.**
+If your repository already had its own, pre-existing `pre-commit` hook before you ran
+`interlock install` at all, that refusal is unchanged:
 
 ```
 GateError: a pre-commit hook that is not this shim is already installed at .../hooks/pre-commit;
 refusing to overwrite it.
 ```
 
-Three honest options, in order of how much this package assumes for you:
+Three honest options for THAT case, in order of how much this package assumes for you:
 
 1. **Compose by hand.** Write your own `pre-commit` file that checks each gate's own
-   marker and `exec`s each gate's own CLI in turn. `tests/git/test_hookkit.py`'s
+   marker and `exec`s each gate's own CLI in turn, alongside whatever your own hook
+   already did. `tests/git/test_hookkit.py`'s
    `TestComposingTwoPreCommitGatesOntoOneSharedHook` class is a complete, runnable
    example — copy its composed shim shape. Then arm each gate's marker with
    `interlock arm git.<gate>` (not `install`, which would try to write the shim again and
-   hit the same refusal).
+   -- since it does not recognize your own hand-written hook as this package's own --
+   hit the same refusal). `interlock status` recognizes a hand-composed hook too, by the
+   same two facts that example's shape necessarily states: a gate's own marker file name
+   and its own CLI module path.
 2. **Delegate to another framework that supports multiple hooks natively** (e.g. the
    pre-commit framework at pre-commit.com) by wrapping each gate's CLI as one of its
    entries.
 3. **Pick one `pre-commit` owner and have it shell out to the others** — the smallest
    change if your existing hook is already a shell script.
 
-`commit-msg` and `reference-transaction` are far less commonly already occupied, but the
-same refusal-rather-than-overwrite behaviour and the same three options apply.
+`commit-msg` and `reference-transaction` are far less commonly already occupied by a
+pre-existing project hook, but the same two facts apply there too: composing another of
+this package's own gates onto either is automatic, and refusing a genuinely foreign hook
+of either name is unchanged.
 
 ### Verifying a gate is actually armed, not just installed
 

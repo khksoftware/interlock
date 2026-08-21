@@ -77,6 +77,8 @@ SPEC = GateSpec(
         marker_name=GATE_MARKER_NAME, hook_name=HOOK_NAME, cli_module=CLI_MODULE,
         gate_label=GATE_LABEL, forwards_hook_arguments=True,
     ),
+    cli_module=CLI_MODULE,
+    gate_label=GATE_LABEL,
 )
 
 #: A git-trailer-shaped line: `Key: value`, key starting with a letter, value non-empty.
