@@ -15,9 +15,8 @@ two boundaries such a workflow actually has:
 - **`interlock.turn`** — refusals and reminders that fire at the moment an **agent turn**
   is about to end or begin: a supervisor/worker dispatch loop's own hook events.
 
-Two hosts, one idea, and — this is the part that used to not be true — **one
-install-and-arm discipline shared between them**. Read on for why that unification is the
-actual point of this package, not merely its packaging.
+Two hosts, one idea, and **one install-and-arm discipline shared between them**. That
+single discipline is the point of this package, not merely its packaging.
 
 ## The problem this exists to solve
 
@@ -46,17 +45,15 @@ actor remembering anything: a check that runs automatically at the moment the ac
 about to happen, and refuses it — or, where refusing is the wrong bias, surfaces an
 unmissable reminder — regardless of who is acting or whether they meant to.** That is an
 interlock. `interlock.git` is that mechanism at the git-action boundary; `interlock.turn`
-is that mechanism at the agent-turn boundary. Neither is a second, unrelated tool that
-happens to ship in the same distribution — they are the identical idea, aimed at the two
-places a modern AI-assisted development loop actually needs it.
+is that mechanism at the agent-turn boundary — the same idea, aimed at the two places an
+AI-assisted development loop needs it.
 
 ## Independent adoption — this is not an all-or-nothing framework
 
-**Consolidating these into one distribution does not mean adopting one drags in the
-other.** This is true in the code, not only in the prose below, and is proven — not just
-asserted — by `tests/test_module_independence.py`, which physically deletes one host's
-subpackage directory from a copy of this source tree and runs the other host's real
-checks, as real subprocesses, against what remains.
+**Taking one host does not drag in the other.** That holds in the code, not only in the
+prose below, and it is proven rather than asserted by `tests/test_module_independence.py`,
+which physically deletes one host's subpackage directory from a copy of this source tree
+and runs the other host's real checks, as real subprocesses, against what remains.
 
 ### Path 1 — git-action gates only, no agents involved at all
 
@@ -103,9 +100,9 @@ interlock arm turn.idle-roster
 Installing both is exactly path 1 and path 2 performed in the same repository, in either
 order. Nothing about doing both changes what either one requires on its own — there is no
 third, combined configuration format, no shared prerequisite state, and no "framework
-mode" that activates once both are present. The only thing genuinely shared is described
-below: one marker mechanism, one configuration *file* (each host reads only its own
-section of it), and one CLI surface for managing both.
+mode" that activates once both are present. What the two share is described below: one
+marker mechanism, one configuration *file* (each host reads only its own section of it),
+and one CLI surface for managing both.
 
 ### What this package does NOT require you to adopt
 
@@ -142,15 +139,12 @@ it.**
   --git-dir`, which resolves separately per worktree even though the shim does not. An
   unarmed worktree's shim reads no marker, finds none, and exits 0 having loaded nothing.
 
-- **`interlock.turn`.** **This is the genuinely new half.** The framework this host was
-  extracted from had no marker concept whatsoever — every hook, once wired into a
-  harness's `settings.json`, simply ran, unconditionally, in every session that
-  configuration reached. Consolidating onto `interlock.git`'s own marker primitive
-  (`interlock.arming`) is how the turn-boundary host inherits that discipline: every hook
-  in `interlock.turn` now checks its OWN per-worktree marker — stored in the exact same
-  `git rev-parse --git-dir` location a git gate's marker lives in, written and read by the
-  literal same function — before doing anything else. Unarmed means a silent no-op:
-  no block, no reminder, nothing printed, exactly mirroring an unarmed git shim.
+- **`interlock.turn`.** Every hook checks its OWN per-worktree marker before doing
+  anything else — stored in the exact same `git rev-parse --git-dir` location a git
+  gate's marker lives in, written and read by the literal same function. Unarmed means a
+  silent no-op: no block, no reminder, nothing printed, exactly mirroring an unarmed git
+  shim. Wiring a hook into a harness therefore does not, on its own, make it enforce
+  anything in any worktree.
 
 - **Where the two structurally cannot be identical, stated plainly rather than forced.**
   A git hook has a shim to install: a fixed file at a fixed, shared, single-file-per-event
@@ -160,11 +154,9 @@ it.**
   appears in `settings.json`) remains what it always was: a manual, disclosed edit you make
   yourself, documented in `docs/INTEGRATION.md`. `interlock install turn.<hook>` therefore
   arms the marker **and prints the exact `settings.json` entry to add**, rather than
-  writing that file itself — advisory, never mutating, and it says so. What consolidation
-  added is real and load-bearing (every turn hook is now silent-by-default until
-  deliberately armed, per worktree); what it did not and structurally cannot add is a
-  second "install once, shared" step, because there is no shared indirection file on the
-  turn-host side to install into.
+  writing that file itself — advisory, never mutating, and it says so. There is no
+  "install once, shared" step on this host, because there is no shared indirection file
+  to install into.
 
 `interlock status` reports both facts — installed/wired, and armed — for every gate and
 hook this distribution ships, or for one given by id. Conflating "installed" with
@@ -191,7 +183,7 @@ path (`interlock.git.protected_paths`, `interlock.turn.idle_roster`).
 
 Every gate shares one installer, one arming discipline, and one hook-shim renderer
 (`interlock.git.hookkit`), and reads git's own plumbing through one shared, tested module
-(`interlock.plumbing`) rather than five independent, slowly-diverging copies of it.
+(`interlock.plumbing`).
 
 ### `interlock.turn` — seven hooks
 
@@ -210,10 +202,9 @@ and printing a JSON verdict on stdout. `interlock.turn.session_record` and
 `interlock.turn.outstanding` hold the logic two or more hooks share, so a shared invariant
 is a single tested implementation rather than independently drifting copies.
 
-## What genuinely became shared, and what stayed intentionally separate
+## What is shared, and what is intentionally separate
 
-Consolidation was not "put two folders next to each other." What actually moved into one
-shared implementation:
+Implemented once and used by both hosts:
 
 1. **The install-and-arm marker mechanism** (`interlock.arming`) — one function set, used
    by `interlock.git.hookkit` for git gates and `interlock.turn.arming` for turn hooks
@@ -221,30 +212,25 @@ shared implementation:
    arms one of each kind in the same worktree through the identical function and shows
    neither collides with the other.
 2. **Git plumbing and repository-root discovery** (`interlock.plumbing`) — both hosts
-   resolve "where is this repository" through the same function. This closed a genuine,
-   if minor, latent defect: the turn host's predecessor package had its own,
-   independently-written copy of "find the repository root" that called
-   `subprocess.run(..., text=True)`, which decodes with the platform's default codepage
-   (the Windows ANSI codepage, not UTF-8) rather than UTF-8 explicitly — harmless on an
-   ASCII-only path, and exactly the kind of drift that consolidating onto one
-   implementation rules out structurally rather than case by case.
+   resolve "where is this repository" through the same function, which decodes git's
+   output as UTF-8 explicitly rather than relying on the platform's default codepage.
+   One implementation means the two hosts cannot disagree about what the repository root
+   is, or about how a non-ASCII path decodes.
 3. **Configuration file and discovery** (`interlock.config`) — one JSON file,
    `interlock.json`, at the repository root, with one section per gate or hook that wants
-   file-based configuration. `interlock.git`'s gates read their own section exactly as
-   before (only the filename changed, from `action-boundary-gates.json`). `interlock.turn`
-   stays primarily environment-variable-configured — see below for why that asymmetry is
-   deliberate — but its one adopter-owned *structured* setting
-   (`session_boundary_rows`, an id-to-reason exemption map) now also falls back to this
-   same shared file's `"turn"` section, so an adopter already using `interlock.json` for
-   the git side gets it without a second file to maintain.
-4. **One CLI** (`interlock install|arm|disarm|status`) replacing five separate
-   `--install`-flagged CLI modules on the git side and NO install/arm/status surface at
-   all on the turn side.
+   file-based configuration. `interlock.git`'s gates each read their own section.
+   `interlock.turn` is primarily environment-variable-configured — see below for why that
+   asymmetry is deliberate — but its one adopter-owned *structured* setting
+   (`session_boundary_rows`, an id-to-reason exemption map) also falls back to this same
+   shared file's `"turn"` section, so an adopter already using `interlock.json` for the
+   git side gets it without a second file to maintain.
+4. **One CLI** (`interlock install|arm|disarm|status`) covering every gate and hook on
+   both hosts.
 5. **One versioning scheme, one `CHANGELOG.md`, one `RELEASE_PROCESS.md`.**
 
-What stayed deliberately separate, because forcing symmetry would have been dishonest:
+Deliberately separate, because forcing symmetry would be dishonest:
 
-- **`interlock.turn`'s configuration stays environment-variable-primary.** A turn hook is
+- **`interlock.turn`'s configuration is environment-variable-primary.** A turn hook is
   invoked by the harness as a subprocess; the one thing every harness reliably lets an
   adopter control at that point is the subprocess's own environment, not a bespoke
   config-file convention this package would have to teach every harness about. See
@@ -255,44 +241,20 @@ What stayed deliberately separate, because forcing symmetry would have been dish
 - **Fail-closed versus fail-open remain different, on purpose, per host.** See "Design
   principles" below.
 
-## What this actually closes, measured rather than claimed
+## Limits — what this cannot catch
 
 A framework that implies more coverage than it has is worse than one that claims less and
-is right. Both halves of this package were developed against real, disclosed populations
-of standing-constraint violations in an actual project — every incident where a correct,
-present rule was not retrieved at the point it bound, over one measurement window of that
-project's own history. Scored against that population, incident by incident, honestly, for
-`interlock.git`'s own class of incident:
+is right. Some of what you might want refused at a boundary is not reachable from any
+boundary, and this section says which, so you do not discover it by being surprised.
 
-- **1 of 15** was an ownership-boundary violation this mechanism class both motivated and
-  now prevents, armed and verified against a real repository.
-- **4 of 15** were repeated invocations of a prohibited git subcommand that the
-  `stash_invocation` gate mechanically solves — the predicate refuses every one of them
-  identically — but which stay unprotected wherever the gate is built and never armed.
-- **2 of 15** were "the team went idle with unblocked work sitting there," a class this
-  package does not implement at the git-action boundary at all (it is exactly what
-  `interlock.turn.idle_roster` targets instead, at the boundary where it IS observable).
-- **8 of 15** were, and remain, permanently outside the reach of this mechanism class or
-  any refusal-at-the-point-of-action mechanism — see "Residue classes" below.
+Each hook and gate documents the specific shape of failure it closes in its own module
+docstring. **Read that docstring before relying on one for something its shape does not
+cover** — the name alone will mislead you.
 
-That is **1 armed-and-reliable, 4 solved-but-unarmed, 2 addressed by the OTHER host in
-this same distribution, 8 permanently unreachable, out of 15** — most of the 15 carrying
-zero protection in practice at the time of measurement, because "solved" and "armed" are
-different facts and a built-but-unarmed gate protects nothing. Arming what is already
-solved closes real, measured exposure at effectively no further engineering cost.
-
-**Do not read this as a verdict on the mechanism class in general.** It is a verdict on
-one project's own measured incident population at one point in time, kept here because
-publishing a rosier, unmeasured figure would be exactly the overstatement this section
-exists to prevent. What transfers to a different project is the *method*: enumerate your
-own real incidents, classify each as armed / solved-but-unarmed / reachable-by-a-different-
-mechanism / permanently unreachable, and report the fraction rather than assume it.
-
-`interlock.turn`'s own seven hooks were extracted the same way: each one closed one
-specific, dated incident on that same project. The exact incident log is internal to that
-project and is not reproduced here, but the *shape* of the incident each hook closes is
-described in that hook's own module docstring, in this same distribution. Read the
-docstring before relying on a hook for something its incident shape does not cover.
+The honest way to size this for your own project is to enumerate your own real incidents
+and classify each one: armed and reliable, solved but not armed, reachable only from a
+different boundary, or permanently unreachable. **"Solved" and "armed" are different
+facts, and a built-but-unarmed gate protects nothing.**
 
 ### Residue classes — permanent, not merely unimplemented, stated per host
 
@@ -331,24 +293,21 @@ otherwise would be the overstatement this section exists to prevent.
 
 ### What was deliberately left out
 
-The framework `interlock.turn` was extracted from carries an eighth hook — a
-`PreToolUse` check that refuses a dispatch when a canonical worker-definition file and the
-copy the harness actually reads have drifted. It is not included here: it depends on that
-framework's own multi-repository, multi-directory skill-and-definition sync tool and that
-tool's exact JSON report schema, and porting it faithfully means porting that whole sync
-tool as a first-class feature of its own, not adapting a small hook. A future release may
+An eighth turn hook is not included: a `PreToolUse` check that refuses a dispatch when a
+canonical worker-definition file and the copy the harness actually reads have drifted. It
+depends on a multi-repository, multi-directory skill-and-definition sync tool and that
+tool's exact report schema, so shipping it faithfully means shipping that whole sync tool
+as a first-class feature of its own, not adapting a small hook. A future release may
 add a generic version; until then, adopting this package means the freshness of whatever
 standing worker-definition file you use is your own responsibility to keep in sync with
 wherever your harness reads it from.
 
-Five session-continuity *skills* (procedural documents a model reads when invoked, for
-things like preparing a session for a context compaction and resuming cleanly afterward)
-from the same source framework are also not included. They are deeply specific prose —
-written throughout in terms of that framework's own multi-file session record, its own
-governance layer, and its own two named hats — and turning them into genuinely portable,
-adopter-agnostic procedures is a substantial rewriting effort in its own right, not a
-find-and-replace. Leaving them out was judged better than shipping a rushed, lower-quality
-generic version of nuanced procedural text.
+Session-continuity *skills* — procedural documents a model reads when invoked, for things
+like preparing a session for a context compaction and resuming cleanly afterward — are
+also not included. Such procedures are only useful when written against a specific
+session-record format, governance layer and role model, and a version general enough to
+ship here would be too vague to follow. This package stays enforcement mechanisms rather
+than procedure.
 
 ### Auditing history for undisclosed violations: a structural blind spot, published as a rule, not a count
 
@@ -420,7 +379,11 @@ repository it protects.
   `test_module_independence.py`'s physical proof of independent adoption; run it yourself
   (`python -m pytest tests` from this directory) before trusting anything above.
 
+## Contact
+
+Questions, bug reports and adoption problems: **khksoftware@gmail.com**.
+
 ## License
 
-Apache-2.0. See the `SPDX-License-Identifier` header on every source file in this
-distribution.
+Apache-2.0. See the `LICENSE` file, and the `SPDX-License-Identifier` header on every
+source file in this distribution.

@@ -239,7 +239,7 @@ set, so a block from one cannot cause another to loop.
 writes it for you — see "The one install-and-arm discipline" in `README.md` for precisely
 why that is a structural fact about turn-boundary hooks, not a missing feature.
 
-### 8. Arming — the part that is genuinely new here
+### 8. Arming
 
 Wiring a hook into `settings.json` is not enough on its own: every hook also checks its
 own per-worktree marker before doing anything, exactly mirroring a git gate's shim.

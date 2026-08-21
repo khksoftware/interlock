@@ -127,7 +127,7 @@ hook subprocesses in.
 | `INTERLOCK_RESUMPTION_COMMANDS` | `/resume,/compact,/clear` | Comma-separated prompt prefixes after which `user_prompt_submit.py` escalates its role-label reminder. |
 
 **`session_boundary_rows` is the one setting also readable from the shared
-`interlock.json`** (see `README.md`'s "What genuinely became shared" section):
+`interlock.json`** (see `README.md`'s "What is shared" section):
 
 ```json
 {
