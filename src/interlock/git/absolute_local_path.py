@@ -152,7 +152,46 @@ def _citation_lookup(entries: Sequence[Mapping[str, Any]]) -> dict[str, tuple[st
 _JOIN_BOUNDARY_CHARS = ("/", "\\", ":")
 
 
-def _is_path_shaped_join(first_line: str, second_line: str) -> bool:
+#: A first line ending in a bare drive colon and nothing else of the path -- the left
+#: half of the only shape that produced a false refusal. See :func:`_is_path_shaped_join`.
+_BARE_DRIVE_COLON_END: re.Pattern[str] = re.compile(r"(?:^|[^A-Za-z0-9])[A-Za-z]:$")
+
+def _is_path_shaped_join(
+    first_line: str,
+    second_line: str,
+    patterns: Sequence[re.Pattern[str]] = ABSOLUTE_LOCAL_PATH_PATTERNS,
+) -> bool:
+    """Whether these two lines should be re-scanned as one, for a path split across them.
+
+    The join has to fire on boundary characters alone, and the reason is worth stating
+    because a narrower rule was tried and failed. Requiring the first line to already
+    contain a complete pattern match sounds safer and is useless: any line that already
+    matches was caught by the per-line pass, so a join gated on that condition adds
+    nothing and is dead code wearing the shape of protection. The cases that genuinely
+    need a join are exactly the ones where NEITHER line matches on its own -- a break
+    right after ``C:``, or after ``/home`` -- and there the boundary characters are the
+    only signal there is.
+
+    Firing on boundary characters alone, however, fuses ordinary prose::
+
+        drive D:
+        /dev/null is empty
+
+    which joins into ``D:/dev/null``. Every observed false refusal had that one shape: a
+    **bare drive colon** ending the first line, and a **forward slash** opening the next.
+    A genuine wrapped Windows path does not look like that -- it continues with a
+    backslash, because that is the separator the drive form uses. So that single
+    combination is excluded, and nothing else is.
+
+    The residual this accepts, stated so it is not mistaken for completeness: a Windows
+    path written with forward slashes (``C:/Users/...``) and broken exactly at the colon
+    is not caught, because it is indistinguishable from the prose above by any rule this
+    function can apply. A path wrapped across three or more lines is not caught either.
+    """
+    if not first_line or not second_line:
+        return False
+    if _BARE_DRIVE_COLON_END.search(first_line) and second_line.startswith("/"):
+        return False  # 'drive D:' / '/dev/null' -- prose, not a wrapped path
     return first_line.endswith(_JOIN_BOUNDARY_CHARS) or second_line.startswith(_JOIN_BOUNDARY_CHARS)
 
 
@@ -208,7 +247,7 @@ def staged_absolute_local_path_failures(
             if first_number in reported_lines or second_number in reported_lines:
                 continue  # already surfaced per-line; do not double-report the same content
             first_line, second_line = lines[line_number - 1], lines[line_number]
-            if not _is_path_shaped_join(first_line, second_line):
+            if not _is_path_shaped_join(first_line, second_line, patterns):
                 continue
             joined = first_line + second_line
             if any(needle in joined for needle in needles):

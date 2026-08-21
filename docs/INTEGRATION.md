@@ -141,9 +141,7 @@ succeeds.** The first gate onto `pre-commit` gets exactly its own solo shim, byt
 byte, same as always; the second and any further gate compose onto it automatically,
 because this package recognizes its own already-installed content and has full authority
 to extend it. `interlock status` reports every composed gate as installed and armed, not
-as a foreign hook occupying the name (`REVIEW_2026-08-21.md`, Findings 2 and 3 — this
-section used to describe a refusal at this exact point, and it no longer happens for two
-or more of this package's own gates).
+as a foreign hook occupying the name.
 
 **Composing is still refused, unconditionally, for a hook this package did not write.**
 If your repository already had its own, pre-existing `pre-commit` hook before you ran

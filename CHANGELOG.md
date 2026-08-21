@@ -8,8 +8,15 @@ reminding about, something it did not before) rather than only a Python API.
 
 ## [Unreleased]
 
-Three fixes from an independent adversarial review (`REVIEW_2026-08-21.md`):
+Three fixes:
 
+- **Fixed: the join pass refused ordinary prose.** Fusing on boundary characters alone
+  joined a line ending in a bare drive colon to a following line opening with a forward
+  slash — `drive D:` above `/dev/null is empty` became `D:/dev/null` and was refused,
+  though neither line embeds a local path. That one shape is now excluded, and a genuine
+  wrapped Windows path is unaffected because the drive form continues with a backslash.
+  Three regression tests pin the prose cases. A gate that refuses good commits gets
+  bypassed as a habit, which costs more than the narrow evasion the join pass closes.
 - **Fixed: `absolute_local_path` was defeated by an ordinary line break.** Its predicate
   scanned line by line only, so a path wrapped across two lines (a copy-pasted log, a
   hard-wrapped table cell) passed with no signal at all. It now also re-scans each

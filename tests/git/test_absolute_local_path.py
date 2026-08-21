@@ -70,6 +70,35 @@ class TestThePredicate:
         assert staged_absolute_local_path_failures(sandbox) == ()
 
 
+class TestTheJoinPassDoesNotRefuseOrdinaryProse:
+    """Regression pins for false refusals an over-broad join predicate produced.
+
+    The join fires on boundary characters, which is the only signal available where
+    neither line matches alone. Firing on them unconditionally fused ordinary prose: a
+    bare drive colon ending one line and a forward slash opening the next joins into
+    something path-shaped that no author wrote. None of the cases here embeds a local
+    path, and every one was refused before that shape was excluded.
+
+    Pinned because the cost is asymmetric. A missed wrapped path is one undetected
+    string; a gate that refuses good commits gets bypassed as a habit and then protects
+    nothing at all.
+    """
+
+    def test_a_drive_letter_in_prose_above_a_posix_path_is_not_fused(self, sandbox: Path) -> None:
+        (sandbox / "notes.md").write_text("drive D:\n/dev/null is empty\n", encoding="utf-8")
+        run_git(sandbox, "add", "notes.md")
+        assert staged_absolute_local_path_failures(sandbox) == ()
+
+    def test_a_section_label_above_a_slash_line_is_not_fused(self, sandbox: Path) -> None:
+        (sandbox / "notes.md").write_text("see section C:\n/notes below\n", encoding="utf-8")
+        run_git(sandbox, "add", "notes.md")
+        assert staged_absolute_local_path_failures(sandbox) == ()
+
+    def test_a_ratio_above_a_fraction_is_not_fused(self, sandbox: Path) -> None:
+        (sandbox / "notes.md").write_text("the ratio was 3:\n/4 overall\n", encoding="utf-8")
+        run_git(sandbox, "add", "notes.md")
+        assert staged_absolute_local_path_failures(sandbox) == ()
+
 class TestLineBreakEvasion:
     """`REVIEW_2026-08-21.md` Finding 1: per-line scanning alone is defeated by an
     ordinary line break -- a wrapped log paste, a hard-wrapped table cell. Re-measured
