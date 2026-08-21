@@ -1,5 +1,9 @@
 # Interlock
 
+<img src="assets/exec-e4b02415-3d9e-4224-8595-55315a28175d.png" align="left" width="230"
+     alt="A hard-hatted figure standing behind a lowered black-and-yellow boom barrier."
+     hspace="20" vspace="6">
+
 **A constraint that cannot be forgotten, because the action will not proceed.**
 
 An interlock, in engineering, is a device that makes an action *impossible* unless a
@@ -17,6 +21,8 @@ two boundaries such a workflow actually has:
 
 Two hosts, one idea, and **one install-and-arm discipline shared between them**. That
 single discipline is the point of this package, not merely its packaging.
+
+<br clear="left">
 
 ## The problem this exists to solve
 
