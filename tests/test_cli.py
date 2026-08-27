@@ -25,6 +25,7 @@ class TestStatus:
         assert result.returncode == 0, result.stderr
         assert "git.protected-paths" in result.stdout
         assert "turn.idle-roster" in result.stdout
+        assert "guard.execution-guard" in result.stdout
 
     def test_a_fresh_sandbox_reports_not_installed_and_not_armed(self, sandbox: Path) -> None:
         result = run_cli(sandbox, "status", "git.protected-paths")
@@ -64,6 +65,31 @@ class TestGitInstallAndArm:
         # The shim stays -- disarm never touches shared wiring, only this worktree's marker.
         assert (sandbox / ".git" / "hooks" / "pre-commit").is_file()
         status = run_cli(sandbox, "status", "git.protected-paths")
+        assert "not armed" in status.stdout
+
+
+class TestGuardInstallAndArm:
+    def test_arm_writes_a_marker_under_the_same_git_dir_as_a_turn_hook(self, sandbox: Path) -> None:
+        run_cli(sandbox, "arm", "guard.execution-guard")
+        run_cli(sandbox, "arm", "turn.idle-roster")
+        markers = {p.name for p in (sandbox / ".git").iterdir() if p.is_file()}
+        assert any("guard-execution-guard" in name for name in markers)
+        assert any("turn-idle-roster" in name for name in markers)
+
+    def test_install_prints_an_advisory_wiring_note_and_never_writes_any_config(
+        self, sandbox: Path,
+    ) -> None:
+        result = run_cli(sandbox, "install", "guard.execution-guard")
+        assert result.returncode == 0, result.stderr
+        assert "interlock.guard.execution_guard" in result.stdout
+        assert not (sandbox / ".claude").exists()
+        assert not (sandbox / "settings.json").exists()
+
+    def test_disarm_a_guard_hook(self, sandbox: Path) -> None:
+        run_cli(sandbox, "arm", "guard.execution-guard")
+        result = run_cli(sandbox, "disarm", "guard.execution-guard")
+        assert result.returncode == 0, result.stderr
+        status = run_cli(sandbox, "status", "guard.execution-guard")
         assert "not armed" in status.stdout
 
 
@@ -137,6 +163,45 @@ class TestReadmePath1Quickstart:
         (sandbox / "ok.md").write_text("nothing to see here\n", encoding="utf-8")
         run_git(sandbox, "add", "ok.md")
         assert run_git(sandbox, "commit", "-q", "-m", "an ordinary commit").returncode == 0
+
+
+class TestPinCheck:
+    def test_a_matching_turn_hook_copy_is_clean(self, sandbox: Path, tmp_path: Path) -> None:
+        from interlock.deployment_pinning import resolve_module_source
+
+        tracked = resolve_module_source("interlock.turn.role_label")
+        deployed = tmp_path / "role_label.py"
+        deployed.write_bytes(tracked.read_bytes())
+        result = run_cli(sandbox, "pin-check", "turn.role-label", "--deployed-path", str(deployed))
+        assert result.returncode == 0, result.stderr
+        assert "matches installed source" in result.stdout
+
+    def test_a_stale_guard_hook_copy_is_reported_and_exits_nonzero(self, sandbox: Path, tmp_path: Path) -> None:
+        deployed = tmp_path / "execution_guard.py"
+        deployed.write_text("# stale\n", encoding="utf-8")
+        result = run_cli(sandbox, "pin-check", "guard.execution-guard", "--deployed-path", str(deployed))
+        assert result.returncode == 1
+        assert "differs from installed source" in result.stderr
+
+    def test_a_matching_git_gate_shim_is_clean(self, sandbox: Path, tmp_path: Path) -> None:
+        from interlock import registry
+
+        gate = registry.find_git_gate("git.protected-paths")
+        deployed = tmp_path / "pre-commit"
+        deployed.write_text(gate.spec.shim, encoding="utf-8", newline="")
+        result = run_cli(sandbox, "pin-check", "git.protected-paths", "--deployed-path", str(deployed))
+        assert result.returncode == 0, result.stderr
+
+    def test_a_missing_deployed_path_is_reported_and_exits_nonzero(self, sandbox: Path, tmp_path: Path) -> None:
+        missing = tmp_path / "does-not-exist.py"
+        result = run_cli(sandbox, "pin-check", "turn.idle-roster", "--deployed-path", str(missing))
+        assert result.returncode == 1
+        assert "no deployed copy" in result.stderr
+
+    def test_unknown_id(self, sandbox: Path, tmp_path: Path) -> None:
+        result = run_cli(sandbox, "pin-check", "bogus.nothing", "--deployed-path", str(tmp_path / "x.py"))
+        assert result.returncode == 2
+        assert "unknown id" in result.stderr
 
 
 class TestUnknownIdEveryVerb:

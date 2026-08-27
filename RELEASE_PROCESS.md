@@ -30,13 +30,15 @@ necessary but not sufficient here, because this package's product is partly a se
 *refusals and reminders*, and their behaviour is as much the contract as any function
 signature:
 
-- **MAJOR**: a change that makes a previously-passing git action, or a previously-silent
-  turn, now refused or escalated by default; a breaking change to a public function's
-  signature; a change to `GateSpec.marker_name`/`hook_name` (silently disarms every
-  existing git-side installation); a change to any key in
-  `interlock.turn.arming.HOOK_MARKER_NAMES` (silently disarms every existing turn-side
-  installation — the identical concern, now on both hosts); a rename of any environment
-  variable in `interlock.turn.config`; or a change to a hook's stdin/stdout contract.
+- **MAJOR**: a change that makes a previously-passing git action, a previously-silent
+  turn, or a previously-unclassified command now refused or escalated by default; a
+  breaking change to a public function's signature; a change to
+  `GateSpec.marker_name`/`hook_name` (silently disarms every existing git-side
+  installation); a change to any key in `interlock.turn.arming.HOOK_MARKER_NAMES` or
+  `interlock.guard.arming.HOOK_MARKER_NAMES` (silently disarms every existing turn-side or
+  guard-side installation — the identical concern, now on every host); a rename of any
+  environment variable in `interlock.turn.config` or `interlock.guard.config`; or a change
+  to a hook's stdin/stdout contract.
 - **MINOR**: a new gate, a new hook, a new optional configuration key with a
   backward-compatible default, or a new public helper that does not change any existing
   check's behaviour.
@@ -49,12 +51,13 @@ signature:
 ## Marker names and environment-variable names are part of the compatibility contract, on BOTH hosts now
 
 Every existing arming marker on every adopter's machine is a file named after either a
-`GateSpec.marker_name` (git side) or an entry in
-`interlock.turn.arming.HOOK_MARKER_NAMES` (turn side), sitting inside that worktree's own
-git directory. Renaming either is not an internal refactor — it silently disarms every
-worktree already armed under the old name, with no error and no signal that anything
-changed. Treat every marker name, and every `INTERLOCK_*` environment variable name in
-`interlock.turn.config`, as append-only and immutable for the lifetime of a gate or hook.
+`GateSpec.marker_name` (git side), an entry in `interlock.turn.arming.HOOK_MARKER_NAMES`
+(turn side), or an entry in `interlock.guard.arming.HOOK_MARKER_NAMES` (guard side),
+sitting inside that worktree's own git directory. Renaming any of them is not an internal
+refactor — it silently disarms every worktree already armed under the old name, with no
+error and no signal that anything changed. Treat every marker name, and every
+`INTERLOCK_*` environment variable name in `interlock.turn.config` or
+`interlock.guard.config`, as append-only and immutable for the lifetime of a gate or hook.
 If one genuinely must change, that is a MAJOR release, and the changelog entry must say
 explicitly: "worktrees armed under the old marker name are now silently unarmed; re-run
 `interlock arm <id>` after upgrading" (or the equivalent for an environment-variable
@@ -70,14 +73,20 @@ rename).
    project's own internal tracking, no vendor/harness name presented as though this
    package were exclusive to it. This is a pre-release check performed every time, because
    a later contribution can reintroduce exactly this.
-3. **The coverage figures and residue-class sections in `README.md` still read as
-   honest**, for BOTH hosts. If a new gate or hook closes a former "permanently
-   unreachable" case, or a known reliability gap is closed elsewhere, update the figure —
-   do not let it go stale in the direction that flatters this package.
+3. **Every doc this distribution ships still reads as honest about what a gate or hook
+   actually does, for EVERY host — not `README.md` alone.** Check the CLASS, not one named
+   file: `README.md`, `CHANGELOG.md`'s entries, and everything under `docs/`, for any claim
+   about what is stripped, refused, covered, or what a heuristic can and cannot tell apart.
+   A claim that is true in one of these and stale in another is exactly the failure this
+   check exists to catch — naming only `README.md` here once let the identical stale claim
+   stand, unchecked, in a second file. If a new gate or hook closes a former "permanently
+   unreachable" case, or a known reliability gap is closed elsewhere, update every place
+   that said otherwise — do not let any one of them go stale in the direction that
+   flatters this package.
 4. **`tests/test_module_independence.py` still passes.** A change that makes
-   `interlock.git` or `interlock.turn` import the other, or depend on the other's
-   configuration to function, is a regression on the independent-adoption claim this
-   package makes, even if every other test is green.
+   `interlock.git`, `interlock.turn`, or `interlock.guard` import another host, or depend
+   on another host's configuration to function, is a regression on the
+   independent-adoption claim this package makes, even if every other test is green.
 5. **`CHANGELOG.md` has an entry**, under the discipline above, before the version bump —
    not after.
 

@@ -1,9 +1,8 @@
 # Usage manual
 
-Every configuration knob either host reads, the session-record schema
-`interlock.turn`'s two roster hooks depend on, and how to author a new gate or hook of
-either class. Read `README.md`'s "Design principles" section first — this document
-assumes it.
+Every configuration knob any host reads, the session-record schema `interlock.turn`'s two
+roster hooks depend on, and how to author a new gate or hook of any class. Read
+`README.md`'s "Design principles" section first — this document assumes it.
 
 ---
 
@@ -207,3 +206,71 @@ malformed (a silent scope miss, not an error).
 7. **Prove a suite that always passes is not silently skipping the real check.** A test
    that asserts "did not block" without first proving the corresponding "did block" case
    exists proves nothing.
+
+---
+
+## Part C — `interlock.guard`: configuration surface and extending the rule set
+
+### Configuration (environment variables)
+
+| Variable | Default | Controls |
+|---|---|---|
+| `INTERLOCK_GUARD_STATE_DIR` | `~/.interlock/guard` | Where a recorded approval, its consumed-approval record, and the audit log (`events.jsonl`) are kept. |
+| `INTERLOCK_GUARD_DEFAULT_APPROVAL_EXPIRY_MINUTES` | `30` | How long a recorded approval remains usable before it expires, unless a caller of `record_approval` passes `--expires-minutes` explicitly (1–1440). |
+
+Both are read fresh on every call, not frozen at import time — a caller that records an
+approval in-process and then drives the real hook as a separate subprocess needs both to
+resolve the identical state directory from the identical environment variable read at the
+moment each one actually runs.
+
+### What a rule is
+
+Every rule this hook recognizes is one entry in `execution_guard.classify_command`: a
+regular expression (or small combination of them) over the command text, an `activity`
+description, and a cheaper `alternative` to suggest. The built-in set (`COST-WORKTREE-ADD`,
+`COST-FULL-TREE-SCAN`, `COST-FULL-TEST-SUITE`, `COST-BROAD-TEST-CLOSURE`,
+`COST-DATABASE-COPY`, `COST-RECURSIVE-HASH`) recognizes only shapes whose broad scope is
+visible in the command text itself, before execution — this is a deliberately small
+guardrail, not a cost oracle, and an ambiguous command matching none of them is not
+evidence it is cheap.
+
+**A heredoc's or here-string's payload is stripped before a rule is evaluated only when
+stripping cannot hide a command that will actually execute** (`strip_payload_bodies`): a real
+closing terminator must be confirmed, the opening line must not feed the body to a
+recognized shell/PowerShell interpreter, and the heredoc's own `<<` must be confirmed to sit
+outside any quoted text (tracked across lines, aware of a backslash-escaped quote). When all
+three hold, a rule sees the invocation shape itself, never content a command happens to be
+writing out; when any one does not, the body is left visible rather than risk silently
+discarding a genuine command. See `README.md`'s Limits section for what this still does not,
+and cannot fully, close: a finite, named list of recognized interpreters, and a
+character-level approximation of shell quoting rather than a full grammar parser. Extend the
+rule set by adding a case to `classify_command`, following the existing entries' shape
+exactly: a regex over the lower-cased, backslash-normalized text, an `activity`, and an
+`alternative` naming the cheaper path. Test both directions — the matching shape blocks, and
+the closest safe neighbour (an exact single file, an existing worktree, a targeted query)
+does not.
+
+### How an approval is recorded, and how long one lasts
+
+`record_approval(sha256, *, reason, alternatives, baseline_plan, expires_minutes=None)`
+writes one JSON receipt under `INTERLOCK_GUARD_STATE_DIR/approvals/<SHA256>.json`,
+requiring `reason`, `alternatives_considered`, and `baseline_reuse_plan` to all be
+non-empty — an approval with no stated reason is indistinguishable from a self-authorized
+bypass, so the hook refuses to record one. `uses_remaining` is always `1`: an approval is
+consumed the first time the exact, unchanged command is retried
+(`consume_approval`), moved to `INTERLOCK_GUARD_STATE_DIR/consumed/`, and cannot be reused.
+It also expires after `expires_minutes` (default from
+`INTERLOCK_GUARD_DEFAULT_APPROVAL_EXPIRY_MINUTES`) regardless of whether it was ever
+consumed. Every block and every consumed-approval event is appended to
+`INTERLOCK_GUARD_STATE_DIR/events.jsonl` as a hashed record — the command's SHA-256 and the
+matched rule ids, never the command's own text, so the audit log itself never becomes a
+second place a sensitive command string is retained.
+
+### Authoring a new guard hook of this class
+
+The same seven steps Part B lists apply here essentially unchanged, with two
+guard-specific substitutions: check `interlock.guard.arming.is_armed("your_hook_name")`
+rather than the turn module's, and add your hook's key to
+`interlock.guard.arming.HOOK_MARKER_NAMES` and to `interlock.registry.GUARD_HOOKS` rather
+than their turn-side counterparts. `tests/guard/test_execution_guard.py` is the template
+to copy for red/green predicate coverage plus a real armed/unarmed subprocess proof.

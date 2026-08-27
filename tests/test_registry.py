@@ -12,11 +12,13 @@ from interlock import registry
 
 
 class TestAllIdsCoversEveryShippedCheck:
-    def test_five_git_gates_and_seven_turn_hooks(self) -> None:
+    def test_five_git_gates_seven_turn_hooks_and_one_guard_hook(self) -> None:
         git_ids = [i for i in registry.all_ids() if i.startswith("git.")]
         turn_ids = [i for i in registry.all_ids() if i.startswith("turn.")]
+        guard_ids = [i for i in registry.all_ids() if i.startswith("guard.")]
         assert len(git_ids) == 5
         assert len(turn_ids) == 7
+        assert len(guard_ids) == 1
         assert len(registry.all_ids()) == len(set(registry.all_ids())), "no duplicate ids"
 
     def test_every_id_is_hyphenated_not_underscored(self) -> None:
@@ -57,4 +59,26 @@ class TestEveryTurnHookKeyHasAMarkerName:
         from interlock.turn.arming import HOOK_MARKER_NAMES
 
         for hook in registry.TURN_HOOKS:
+            assert hook.hook_key in HOOK_MARKER_NAMES
+
+
+class TestFindGuardHook:
+    def test_known_id_resolves(self) -> None:
+        hook = registry.find_guard_hook("guard.execution-guard")
+        assert hook is not None
+        assert hook.module == "interlock.guard.execution_guard"
+        assert hook.hook_key == "execution_guard"
+
+    def test_unknown_id_returns_none(self) -> None:
+        assert registry.find_guard_hook("guard.does-not-exist") is None
+
+    def test_a_turn_id_is_not_a_guard_hook(self) -> None:
+        assert registry.find_guard_hook("turn.idle-roster") is None
+
+
+class TestEveryGuardHookKeyHasAMarkerName:
+    def test_hook_keys_match_arming_registrations(self) -> None:
+        from interlock.guard.arming import HOOK_MARKER_NAMES
+
+        for hook in registry.GUARD_HOOKS:
             assert hook.hook_key in HOOK_MARKER_NAMES

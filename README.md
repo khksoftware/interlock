@@ -12,14 +12,17 @@ will not release under pressure. Not a warning. Not a checklist. Not a reminder.
 action does not proceed.
 
 This package is that idea applied to software development with AI coding agents, at the
-two boundaries such a workflow actually has:
+three boundaries such a workflow actually has:
 
 - **`interlock.git`** — refusals that fire at the moment a **git action** is attempted:
   `pre-commit`, `commit-msg`, `reference-transaction`.
 - **`interlock.turn`** — refusals and reminders that fire at the moment an **agent turn**
   is about to end or begin: a supervisor/worker dispatch loop's own hook events.
+- **`interlock.guard`** — a refusal that fires **before a command executes**: a
+  high-confidence, long or I/O-heavy shape blocked before it runs, until an explicit,
+  disclosed, one-shot approval clears it.
 
-Two hosts, one idea, and **one install-and-arm discipline shared between them**. That
+Three hosts, one idea, and **one install-and-arm discipline shared between them**. That
 single discipline is the point of this package, not merely its packaging.
 
 <br clear="left">
@@ -34,8 +37,8 @@ happens later, under time pressure, in the middle of solving a different problem
 the rule is not "unknown," it is simply not *retrieved* — nothing at the point of the
 action asks whether it applies.
 
-This is a measured failure mode, not a hypothetical one, and it recurs identically at both
-boundaries this package targets. On the git side: a correct, present, well-written rule
+This is a measured failure mode, not a hypothetical one, and it recurs identically at
+every boundary this package targets. On the git side: a correct, present, well-written rule
 ("never embed an absolute path," "never `git stash`," "no vendor attribution on a commit")
 was violated anyway, repeatedly, because nothing stood between the intention and the
 action to ask "does a rule apply here?" On the agent-turn side: a standing obligation
@@ -44,15 +47,19 @@ work," "the board should match what was actually dispatched") was adopted, corre
 stated, and still lapsed across a long session — because an announced action reads as a
 taken one, a delivered report reads like the end of a turn, and a resumption point is
 exactly where a self-applied habit is least likely to survive, because attention has just
-been pulled elsewhere.
+been pulled elsewhere. Before a command even runs: a standing cost-proportionality
+practice ("prefer the cheaper alternative," "run the change-triggered closure, not the
+full suite") was known, stated, and still overridden under time pressure, in the middle of
+solving a different problem — the identical gap, one boundary earlier.
 
 **The only mechanism that reliably closes this gap is one that does not depend on the
 actor remembering anything: a check that runs automatically at the moment the action is
 about to happen, and refuses it — or, where refusing is the wrong bias, surfaces an
 unmissable reminder — regardless of who is acting or whether they meant to.** That is an
 interlock. `interlock.git` is that mechanism at the git-action boundary; `interlock.turn`
-is that mechanism at the agent-turn boundary — the same idea, aimed at the two places an
-AI-assisted development loop needs it.
+is that mechanism at the agent-turn boundary; `interlock.guard` is that mechanism one step
+earlier still, before a command executes at all — the same idea, aimed at the three
+places an AI-assisted development loop needs it.
 
 ## Independent adoption — this is not an all-or-nothing framework
 
@@ -108,14 +115,30 @@ interlock arm turn.role-label
 interlock arm turn.idle-roster
 ```
 
-### Path 3 — both together
+### Path 3 — the pre-execution guard only, nothing else required
 
-Installing both is exactly path 1 and path 2 performed in the same repository, in either
-order. Nothing about doing both changes what either one requires on its own — there is no
-third, combined configuration format, no shared prerequisite state, and no "framework
-mode" that activates once both are present. What the two share is described below: one
-marker mechanism, one configuration *file* (each host reads only its own section of it),
-and one CLI surface for managing both.
+**An estate that wants only the before-a-command-runs check gets exactly that.**
+`interlock.guard` never imports `interlock.git` or `interlock.turn`, and its one hook
+depends on neither:
+
+```bash
+pip install interlock
+# Wire it into your harness's own pre-tool-use hook configuration --
+# see docs/INTEGRATION.md for the exact settings.json shape Claude Code expects:
+#   PreToolUse -> python -m interlock.guard.execution_guard
+
+interlock arm guard.execution-guard
+```
+
+### Path 4 — any combination
+
+Installing more than one host is exactly the paths above performed in the same
+repository, in any order. Nothing about combining them changes what any one requires on
+its own — there is no combined configuration format, no shared prerequisite state, and no
+"framework mode" that activates once more than one is present. What they share is
+described below: one marker mechanism, one configuration *file* for the hosts that use
+one (each reads only its own section of it), and one CLI surface for managing all of
+them.
 
 ### What this package does NOT require you to adopt
 
@@ -183,8 +206,9 @@ a foreign hook merely because more than one gate shares its hook name.
 ### Naming a gate
 
 An identifier has the shape `<host>.<name>` for the CLI (`git.protected-paths`,
-`turn.idle-roster`), corresponding one-to-one with the check's own dotted Python module
-path (`interlock.git.protected_paths`, `interlock.turn.idle_roster`).
+`turn.idle-roster`, `guard.execution-guard`), corresponding one-to-one with the check's
+own dotted Python module path (`interlock.git.protected_paths`,
+`interlock.turn.idle_roster`, `interlock.guard.execution_guard`).
 
 ## What ships
 
@@ -219,20 +243,43 @@ and printing a JSON verdict on stdout. `interlock.turn.session_record` and
 `interlock.turn.outstanding` hold the logic two or more hooks share, so a shared invariant
 is a single tested implementation rather than independently drifting copies.
 
+### `interlock.guard` — one hook
+
+| Hook | Fires on | What it does |
+|---|---|---|
+| `execution_guard` | before a command executes | refuses a command whose text matches a small, fixed set of high-confidence expensive shapes (an additional git worktree, a full-tree or full-test-suite scan, a whole-file database copy, recursive hashing), until an explicit, expiring, one-shot approval bound to the command's exact SHA-256 clears it |
+
+A heredoc's or here-string's payload embedded in the same command string is stripped
+before classification **only when** a real closing terminator is confirmed, the body's
+opening line does not feed it to a recognized shell/PowerShell interpreter, and the
+heredoc's own `<<` is confirmed to sit outside any quoted text (tracked across lines, and
+aware of a backslash-escaped quote character) — so content that merely MENTIONS an
+expensive shape is not confused with a command that will actually run one, while a heredoc
+body a shell is actually about to run, one whose terminator is never confirmed, or an
+ordinary quoted string that happens to contain `<<` and a later coincidentally-matching bare
+word, is left visible rather than silently discarded. See the module's own docstring and
+"Limits" below for the residue classes this does not, and cannot fully, close: a command
+string is all this hook ever sees, so content written through any other kind of tool call is
+invisible to it; the set of interpreter names recognized on a heredoc's opening line is
+finite, so a body fed to an interpreter under an unrecognized name is treated as inert and
+stripped anyway; and the quoted-text check itself is a cheap, character-level approximation
+of shell quoting, not a full grammar parser, so a construct that reopens or changes quoting
+context through shell expansion is not modeled.
+
 ## What is shared, and what is intentionally separate
 
-Implemented once and used by both hosts:
+Implemented once and used by more than one host:
 
 1. **The install-and-arm marker mechanism** (`interlock.arming`) — one function set, used
-   by `interlock.git.hookkit` for git gates and `interlock.turn.arming` for turn hooks
-   alike. Proven, not just claimed: `tests/test_arming.py::TestGitAndTurnMarkersCoexist`
-   arms one of each kind in the same worktree through the identical function and shows
-   neither collides with the other.
-2. **Git plumbing and repository-root discovery** (`interlock.plumbing`) — both hosts
-   resolve "where is this repository" through the same function, which decodes git's
+   by `interlock.git.hookkit` for git gates, `interlock.turn.arming` for turn hooks, and
+   `interlock.guard.arming` for the pre-execution guard alike. Proven, not just claimed:
+   `tests/test_arming.py::TestGitAndTurnMarkersCoexist` arms one of each kind in the same
+   worktree through the identical function and shows neither collides with the other.
+2. **Git plumbing and repository-root discovery** (`interlock.plumbing`) — every host
+   resolves "where is this repository" through the same function, which decodes git's
    output as UTF-8 explicitly rather than relying on the platform's default codepage.
-   One implementation means the two hosts cannot disagree about what the repository root
-   is, or about how a non-ASCII path decodes.
+   One implementation means no host can disagree about what the repository root is, or
+   about how a non-ASCII path decodes.
 3. **Configuration file and discovery** (`interlock.config`) — one JSON file,
    `interlock.json`, at the repository root, with one section per gate or hook that wants
    file-based configuration. `interlock.git`'s gates each read their own section.
@@ -240,21 +287,32 @@ Implemented once and used by both hosts:
    asymmetry is deliberate — but its one adopter-owned *structured* setting
    (`session_boundary_rows`, an id-to-reason exemption map) also falls back to this same
    shared file's `"turn"` section, so an adopter already using `interlock.json` for the
-   git side gets it without a second file to maintain.
+   git side gets it without a second file to maintain. `interlock.guard` is entirely
+   environment-variable-configured, for the same reason `interlock.turn` is (see below),
+   and has no section of this file at all -- there is no structured setting of its own
+   worth a second file for yet.
 4. **One CLI** (`interlock install|arm|disarm|status`) covering every gate and hook on
-   both hosts.
+   every host.
 5. **One versioning scheme, one `CHANGELOG.md`, one `RELEASE_PROCESS.md`.**
+6. **Deployed-copy pinning** (`interlock.deployment_pinning`, `interlock pin-check <id>
+   --deployed-path <path>`) — for an adopter whose deployment convention copies a turn or
+   guard hook's file into a per-user hooks directory rather than invoking the installed
+   package directly, one CLI verb verifies that copy against its own tracked source, on
+   any host, by id. See `docs/INTEGRATION.md`'s "Deployed-copy pinning" section. Not an
+   armed, automatically-running check — a callable and a CLI verb you run on your own
+   cadence.
 
 Deliberately separate, because forcing symmetry would be dishonest:
 
-- **`interlock.turn`'s configuration is environment-variable-primary.** A turn hook is
-  invoked by the harness as a subprocess; the one thing every harness reliably lets an
-  adopter control at that point is the subprocess's own environment, not a bespoke
-  config-file convention this package would have to teach every harness about. See
-  `interlock.turn.config`'s own module docstring.
-- **`interlock.turn` has no shim to install**, because there is no shared,
-  single-file-per-event indirection layer on that side to install into — see "The one
-  install-and-arm discipline" above.
+- **`interlock.turn`'s and `interlock.guard`'s configuration is environment-variable-primary.**
+  A turn hook or the pre-execution guard is invoked by the harness as a subprocess; the one
+  thing every harness reliably lets an adopter control at that point is the subprocess's own
+  environment, not a bespoke config-file convention this package would have to teach every
+  harness about. See `interlock.turn.config`'s and `interlock.guard.config`'s own module
+  docstrings.
+- **Neither `interlock.turn` nor `interlock.guard` has a shim to install**, because there is
+  no shared, single-file-per-event indirection layer on either side to install into — see
+  "The one install-and-arm discipline" above.
 - **Fail-closed versus fail-open remain different, on purpose, per host.** See "Design
   principles" below.
 
@@ -304,8 +362,40 @@ facts, and a built-but-unarmed gate protects nothing.**
   boundary between what a script can read off a transcript and what only genuine judgement
   can verify.
 
-Both classes, on both hosts, are permanent, not merely unimplemented. Nothing proposed for
-a future version of this package closes any of the four, and a roadmap that claimed
+**`interlock.guard`'s three permanent blind spots, the first still the sharpest across the
+whole package:**
+
+- **Channel-dependent coverage.** This hook reads a command STRING handed to it through a
+  recognized shell-tool call. Content written through any other kind of tool call — a
+  structured file-write, an edit, a patch application — produces no command string for
+  this hook to read at all, so it is never even invoked with anything to scan for that
+  channel. **A clean run, or no invocation at all, is not evidence that content written
+  some other way was checked for cost.** Closing this would mean moving the check off the
+  command string entirely, onto some effect a harness exposes uniformly across every tool
+  — a different and substantially larger mechanism than this one, of uncertain
+  reachability on any given harness, and not something this package's current design
+  attempts.
+- **Interpreter-name coverage is a finite, named list.** A heredoc's or here-string's body
+  is treated as inert data — and stripped before classification — unless its opening line
+  names or pipes into one of a fixed set of recognized shell/PowerShell interpreters. An
+  interpreter invoked under a name not on that list (an obscure shell, an alias, a wrapper
+  script) is not recognized, so a body it is actually about to run is stripped anyway, the
+  same failure this hook exists to prevent. The list is disclosed in the module's own
+  docstring, not silently assumed complete, and growing it narrows this residue without
+  ever provably exhausting it: an adopter can always invoke something under a name this
+  package has not seen.
+- **Quote-tracking is a character-level approximation of shell quoting, not a shell-grammar
+  parser.** Deciding whether a `<<` sits inside quoted text is done by counting quote
+  characters (across lines, and aware of a backslash-escaped quote), the same cheap, local
+  approach every rule in this hook uses — not by parsing the command the way a real shell
+  does. A construct that reopens or changes quoting context through shell expansion (command
+  substitution, ANSI-C `$'...'` quoting, backtick substitution) is not modeled, and is not
+  claimed to be. Biased the same direction as the rest of this hook: what this cannot
+  correctly resolve is treated as "still inside a quote," so the failure mode is a body left
+  visible to the classifier, never a real command silently discarded.
+
+Every class above, on every host, is permanent, not merely unimplemented. Nothing proposed
+for a future version of this package closes any of them, and a roadmap that claimed
 otherwise would be the overstatement this section exists to prevent.
 
 ### What was deliberately left out
@@ -354,7 +444,7 @@ repository it protects.
 ## Design principles, in one place
 
 - **Fail closed on `interlock.git`; fail OPEN on `interlock.turn` — deliberately, not by
-  accident, and this is the sharpest asymmetry between the two hosts.** If a git gate
+  accident, and this is the sharpest asymmetry between those two hosts.** If a git gate
   cannot determine whether an action is safe, it refuses — an unverifiable action is not a
   verified one (`interlock.errors.GateError`). If a turn-boundary hook cannot read its
   transcript, its session record, or its payload, it does nothing and blocks nothing. This
@@ -362,10 +452,17 @@ repository it protects.
   costs on each side. A blocked commit costs a `--no-verify` and a disclosed note. A
   turn-boundary hook that wedges every turn on any I/O hiccup gets disabled by its own
   operator within a day, and a disabled hook protects nothing at all.
+- **`interlock.guard` sits between the two, by design, not as an unresolved compromise.**
+  It fails OPEN on anything it cannot classify or was never handed to scan at all — the
+  same bias as `interlock.turn`, for the same reason: a guard that wedges every command it
+  cannot parse gets disabled by its own operator. But once a command's text DOES match one
+  of its fixed, high-confidence expensive shapes, it refuses exactly as unconditionally as
+  a git gate does, until an explicit, disclosed approval clears it. Ambiguous: open. Matched:
+  closed. Never the other way around.
 - **The shim holds no logic** (git side). Everything a gate could get wrong lives in a
   tracked, tested Python module; the installed hook file is a small, fixed, byte-frozen
   shell script that only `exec`s that module.
-- **Arm per worktree, wire once — on both hosts, per "The one install-and-arm
+- **Arm per worktree, wire once — on every host, per "The one install-and-arm
   discipline" above.**
 - **Bypassable, and that is stated, not hidden.** `git commit --no-verify`, repointing
   `core.hooksPath`, deleting a worktree's own arming marker, or removing a hook entry from
@@ -377,20 +474,23 @@ repository it protects.
   reads only the transcript, payload, or record in front of it at the boundary it fires
   on — never a query to the harness's own live process state (see
   `roster_reconciliation`'s own docstring for why a live liveness probe is deliberately
-  never attempted there).
+  never attempted there). The pre-execution guard reads only the one command string it was
+  handed — never a broader search of what else is running or what else was recently done.
 - **Configuration lives in as few places as each host's own constraints allow** — one
   shared file for anything file-based (`interlock.config`), environment variables where
   that is genuinely the only mechanism a harness reliably exposes
-  (`interlock.turn.config`). A hook or gate module with a project-specific literal typed
-  into its own logic is a bug in this package, not a feature of an adopter's fork.
+  (`interlock.turn.config`, `interlock.guard.config`). A hook or gate module with a
+  project-specific literal typed into its own logic is a bug in this package, not a
+  feature of an adopter's fork.
 
 ## Where to go next
 
-- **`docs/INTEGRATION.md`** — installing this into a real project: three separate
-  adoption paths (git alone, turn alone, both), hook wiring, arming markers, and what to
-  do if a `pre-commit` hook or a `settings.json` entry already exists.
+- **`docs/INTEGRATION.md`** — installing this into a real project: adoption paths (git
+  alone, turn alone, the pre-execution guard alone, or any combination), hook wiring,
+  arming markers, and what to do if a `pre-commit` hook or a `settings.json` entry already
+  exists.
 - **`docs/USAGE.md`** — every configuration knob, the session-record schema, and how to
-  author a new gate or hook of either class.
+  author a new gate or hook of any class.
 - **`CHANGELOG.md`** / **`RELEASE_PROCESS.md`** — versioning and how a release is cut.
 - **`tests/`** — the full suite this README's claims are checked against, including
   `test_module_independence.py`'s physical proof of independent adoption; run it yourself

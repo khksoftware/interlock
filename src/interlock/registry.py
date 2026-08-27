@@ -1,21 +1,22 @@
 # SPDX-License-Identifier: Apache-2.0
 """The table of every installable gate and hook this distribution ships, by identifier.
 
-This is what makes ``interlock install|arm|disarm|status`` a single command over both
-host modules rather than two hosts each keeping their own installer surface. An
+This is what makes ``interlock install|arm|disarm|status`` a single command over all
+three host modules rather than each host keeping its own installer surface. An
 identifier has the shape ``<host>.<name>`` -- ``git.protected-paths``,
-``turn.idle-roster`` -- hyphenated for the shell, corresponding one-to-one with the
-predicate or hook module's own dotted Python path with underscores
-(``interlock.git.protected_paths``, ``interlock.turn.idle_roster``): see ``README.md``'s
-"naming a gate" section.
+``turn.idle-roster``, ``guard.execution-guard`` -- hyphenated for the shell, corresponding
+one-to-one with the predicate or hook module's own dotted Python path with underscores
+(``interlock.git.protected_paths``, ``interlock.turn.idle_roster``,
+``interlock.guard.execution_guard``): see ``README.md``'s "naming a gate" section.
 
-Importing this module imports both :mod:`interlock.git` and :mod:`interlock.turn` -- it
-is the one place in this distribution that legitimately needs both, because a CLI that
-dispatches by identifier across both hosts has to know both. This is different from every
-other module in either host subpackage, none of which imports its sibling -- see
-``README.md``'s section on independent adoption. An adopter who only ever calls
-`interlock.git.hookkit.install` directly, or only ever imports `interlock.turn.role_label`,
-never touches this module and never pays for the import of the host they are not using.
+Importing this module imports :mod:`interlock.git`, :mod:`interlock.turn`, AND
+:mod:`interlock.guard` -- it is the one place in this distribution that legitimately needs
+all three, because a CLI that dispatches by identifier across every host has to know all of
+them. This is different from every other module in any host subpackage, none of which
+imports its siblings -- see ``README.md``'s section on independent adoption. An adopter who
+only ever calls `interlock.git.hookkit.install` directly, or only ever imports
+`interlock.turn.role_label`, or only ever imports `interlock.guard.execution_guard`, never
+touches this module and never pays for the import of a host they are not using.
 """
 from __future__ import annotations
 
@@ -26,6 +27,7 @@ from interlock.git import (
     synthetic_git_identity,
 )
 from interlock.git.hookkit import GateSpec
+from interlock.guard.arming import HOOK_MARKER_NAMES as GUARD_HOOK_MARKER_NAMES
 from interlock.turn.arming import HOOK_MARKER_NAMES
 
 
@@ -39,6 +41,15 @@ class GitGateEntry:
 
 @dataclass(frozen=True)
 class TurnHookEntry:
+    id: str
+    label: str
+    hook_key: str
+    module: str
+    command: str
+
+
+@dataclass(frozen=True)
+class GuardHookEntry:
     id: str
     label: str
     hook_key: str
@@ -105,9 +116,24 @@ assert {h.hook_key for h in TURN_HOOKS} == set(HOOK_MARKER_NAMES), (
     "TURN_HOOKS and interlock.turn.arming.HOOK_MARKER_NAMES have drifted apart"
 )
 
+#: hook_key must match a key in `interlock.guard.arming.HOOK_MARKER_NAMES` exactly.
+GUARD_HOOKS: tuple[GuardHookEntry, ...] = (
+    GuardHookEntry(
+        "guard.execution-guard", "execution-guard hook", "execution_guard",
+        "interlock.guard.execution_guard", "python -m interlock.guard.execution_guard",
+    ),
+)
+
+assert {h.hook_key for h in GUARD_HOOKS} == set(GUARD_HOOK_MARKER_NAMES), (
+    "GUARD_HOOKS and interlock.guard.arming.HOOK_MARKER_NAMES have drifted apart"
+)
+
 
 def all_ids() -> tuple[str, ...]:
-    return tuple(g.id for g in GIT_GATES) + tuple(h.id for h in TURN_HOOKS)
+    return (
+        tuple(g.id for g in GIT_GATES) + tuple(h.id for h in TURN_HOOKS)
+        + tuple(h.id for h in GUARD_HOOKS)
+    )
 
 
 def find_git_gate(identifier: str) -> GitGateEntry | None:
@@ -118,7 +144,11 @@ def find_turn_hook(identifier: str) -> TurnHookEntry | None:
     return next((h for h in TURN_HOOKS if h.id == identifier), None)
 
 
+def find_guard_hook(identifier: str) -> GuardHookEntry | None:
+    return next((h for h in GUARD_HOOKS if h.id == identifier), None)
+
+
 __all__ = (
-    "GIT_GATES", "TURN_HOOKS", "GitGateEntry", "TurnHookEntry", "all_ids", "find_git_gate",
-    "find_turn_hook",
+    "GIT_GATES", "GUARD_HOOKS", "TURN_HOOKS", "GitGateEntry", "GuardHookEntry", "TurnHookEntry",
+    "all_ids", "find_git_gate", "find_guard_hook", "find_turn_hook",
 )

@@ -182,3 +182,72 @@ class TestTurnHostIndependentOfGitHost:
         )
         assert armed.returncode == 0
         assert '"decision": "block"' in armed.stdout
+
+
+class TestGuardHostIndependentOfGitAndTurn:
+    def test_guard_subpackage_is_genuinely_absent_from_a_git_only_or_turn_only_copy(
+        self, tmp_path: Path,
+    ) -> None:
+        trimmed = _trimmed_copy(tmp_path, remove="guard")
+        assert not (trimmed / "interlock" / "guard").exists()
+        assert (trimmed / "interlock" / "git").is_dir()
+        assert (trimmed / "interlock" / "turn").is_dir()
+
+    def test_every_guard_hook_module_imports_with_git_and_turn_absent(self, tmp_path: Path) -> None:
+        without_git = _trimmed_copy(tmp_path, remove="git")
+        shutil.rmtree(without_git / "interlock" / "turn")
+        code = "import interlock.guard.arming, interlock.guard.config, interlock.guard.execution_guard; print('GUARD_HOST_OK')"
+        result = _run_python(without_git, code)
+        assert result.returncode == 0, result.stderr
+        assert "GUARD_HOST_OK" in result.stdout
+
+    def test_importing_guard_fails_because_it_is_physically_gone(self, tmp_path: Path) -> None:
+        trimmed = _trimmed_copy(tmp_path, remove="guard")
+        result = _run_python(trimmed, "import interlock.guard")
+        assert result.returncode != 0
+        assert "ModuleNotFoundError" in result.stderr or "ImportError" in result.stderr
+
+    def test_registry_and_cli_fail_cleanly_because_they_need_every_host(self, tmp_path: Path) -> None:
+        trimmed = _trimmed_copy(tmp_path, remove="guard")
+        result = _run_python(trimmed, "import interlock.registry")
+        assert result.returncode != 0
+        result_cli = _run_python(trimmed, "import interlock.cli")
+        assert result_cli.returncode != 0
+
+    def test_a_real_hook_arms_and_blocks_with_git_and_turn_absent(self, tmp_path: Path, sandbox: Path) -> None:
+        """The end-to-end proof: arm the guard hook and drive a REAL subprocess invocation
+        of it -- unarmed first (silent no-op), then armed (a real block) -- using ONLY a
+        copy with `interlock.git` and `interlock.turn` both physically removed."""
+        trimmed = _trimmed_copy(tmp_path, remove="git")
+        shutil.rmtree(trimmed / "interlock" / "turn")
+        full_env = dict(os.environ)
+        full_env["PYTHONPATH"] = str(trimmed)
+
+        unarmed = subprocess.run(
+            [sys.executable, "-B", "-m", "interlock.guard.execution_guard"],
+            cwd=str(sandbox),
+            input='{"tool_name": "Bash", "tool_input": {"command": "git worktree add ../new origin/main"}}',
+            capture_output=True, text=True, env=full_env, check=False,
+        )
+        assert unarmed.returncode == 0
+        assert unarmed.stdout.strip() == "", "unarmed should be a silent no-op even with git/turn absent"
+
+        arm = subprocess.run(
+            [
+                sys.executable, "-B", "-c",
+                "from interlock.guard import arming; print(arming.arm('execution_guard'))",
+            ],
+            cwd=str(sandbox), capture_output=True, text=True, env=full_env, check=False,
+        )
+        assert arm.returncode == 0, arm.stderr
+
+        armed = subprocess.run(
+            [sys.executable, "-B", "-m", "interlock.guard.execution_guard"],
+            cwd=str(sandbox),
+            input='{"tool_name": "Bash", "tool_input": {"command": "git worktree add ../new origin/main"}}',
+            capture_output=True, text=True, env=full_env, check=False,
+        )
+        assert armed.returncode == 0
+        # Compact separators, unlike interlock.turn's hooks -- matches
+        # execution_guard.block_reason's own json.dumps(..., separators=(",", ":")).
+        assert '"decision":"block"' in armed.stdout

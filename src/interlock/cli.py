@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""The unified `interlock` command: install, arm, disarm, and status, across both hosts.
+"""The unified `interlock` command: install, arm, disarm, and status, across every host.
 
     interlock install  git.protected-paths
     interlock arm      git.protected-paths
@@ -8,20 +8,22 @@
     interlock status   turn.idle-roster
 
 One surface, one identifier scheme (``<host>.<name>``, see :mod:`interlock.registry`),
-covering both `interlock.git`'s gates and `interlock.turn`'s hooks -- before consolidation,
-the git host had five separate `--install` flags scattered across five CLI modules and the
-turn host had no install/arm/status surface of any kind. This module is what "one
-install-and-arm discipline" means as a user-facing command, not only as shared library
-code.
+covering `interlock.git`'s gates, `interlock.turn`'s hooks, and `interlock.guard`'s hook --
+before consolidation, the git host had five separate `--install` flags scattered across
+five CLI modules and the turn host had no install/arm/status surface of any kind. This
+module is what "one install-and-arm discipline" means as a user-facing command, not only as
+shared library code.
 
-**`install` vs. `arm`, kept distinct on both hosts, for the same reason on both.** `arm`
-only ever writes THIS worktree's own per-worktree marker -- the additive, always-safe
+**`install` vs. `arm`, kept distinct on every host, for the same reason on all of them.**
+`arm` only ever writes THIS worktree's own per-worktree marker -- the additive, always-safe
 half. `install` does that AND whatever WIRING half a host has: for `interlock.git`, writing
 the shared shell shim into the shared hooks directory (refusing to overwrite a foreign
-hook); for `interlock.turn`, printing -- never writing -- the exact `settings.json` entry
-to add yourself, because there is no shared indirection layer this package can install
-into the way a git hook shim is installed (see :mod:`interlock.turn.arming`'s own
-docstring for precisely why that asymmetry is structural, not an oversight).
+hook); for `interlock.turn` and `interlock.guard` alike, printing -- never writing -- the
+exact hook-configuration entry to add yourself, because neither has a shared indirection
+layer this package can install into the way a git hook shim is installed (see
+:mod:`interlock.turn.arming`'s own docstring for precisely why that asymmetry is
+structural, not an oversight -- :mod:`interlock.guard.arming` is built the same way, one
+host down).
 
 **`status` reports what is installed and what is actually armed, separately, for every
 id this distribution knows** (or one, if given). Conflating the two -- "installed" reading
@@ -36,9 +38,10 @@ import sys
 from pathlib import Path
 
 from interlock import arming as shared_arming
-from interlock import registry
+from interlock import deployment_pinning, registry
 from interlock.errors import GateError
 from interlock.git.hookkit import arm_marker, install, installation_state, is_armed as git_is_armed
+from interlock.guard import arming as guard_arming
 from interlock.plumbing import working_tree_root
 from interlock.turn import arming as turn_arming
 
@@ -84,6 +87,18 @@ def cmd_install(args: argparse.Namespace) -> int:
         print(turn_arming.install_note(hook.hook_key, command=hook.command))
         return 0
 
+    guard_hook = registry.find_guard_hook(args.id)
+    if guard_hook is not None:
+        root = args.repository_root.resolve() if args.repository_root is not None else None
+        try:
+            print(guard_arming.arm(guard_hook.hook_key, root=root))
+        except ValueError as error:
+            print(str(error), file=sys.stderr)
+            return 2
+        print()
+        print(guard_arming.install_note(guard_hook.hook_key, command=guard_hook.command))
+        return 0
+
     print(_unknown_id(args.id), file=sys.stderr)
     return 2
 
@@ -114,6 +129,16 @@ def cmd_arm(args: argparse.Namespace) -> int:
             return 2
         return 0
 
+    guard_hook = registry.find_guard_hook(args.id)
+    if guard_hook is not None:
+        root = args.repository_root.resolve() if args.repository_root is not None else None
+        try:
+            print(guard_arming.arm(guard_hook.hook_key, root=root))
+        except ValueError as error:
+            print(str(error), file=sys.stderr)
+            return 2
+        return 0
+
     print(_unknown_id(args.id), file=sys.stderr)
     return 2
 
@@ -134,6 +159,16 @@ def cmd_disarm(args: argparse.Namespace) -> int:
         root = args.repository_root.resolve() if args.repository_root is not None else None
         try:
             print(turn_arming.disarm(hook.hook_key, root=root))
+        except ValueError as error:
+            print(str(error), file=sys.stderr)
+            return 2
+        return 0
+
+    guard_hook = registry.find_guard_hook(args.id)
+    if guard_hook is not None:
+        root = args.repository_root.resolve() if args.repository_root is not None else None
+        try:
+            print(guard_arming.disarm(guard_hook.hook_key, root=root))
         except ValueError as error:
             print(str(error), file=sys.stderr)
             return 2
@@ -163,6 +198,15 @@ def _turn_status_line(hook: registry.TurnHookEntry, root: Path | None) -> str:
     )
 
 
+def _guard_status_line(hook: registry.GuardHookEntry, root: Path | None) -> str:
+    armed = guard_arming.is_armed(hook.hook_key, root=root) if root is not None else False
+    disposition = "armed" if armed else "not armed"
+    return (
+        f"{hook.id:<28} [guard] wiring is a manual hook-configuration edit (see "
+        f"docs/INTEGRATION.md); {disposition} in this worktree"
+    )
+
+
 def cmd_status(args: argparse.Namespace) -> int:
     try:
         root = _git_root(args)
@@ -179,17 +223,49 @@ def cmd_status(args: argparse.Namespace) -> int:
         if hook is not None:
             print(_turn_status_line(hook, root))
             continue
+        guard_hook = registry.find_guard_hook(identifier)
+        if guard_hook is not None:
+            print(_guard_status_line(guard_hook, root))
+            continue
         print(_unknown_id(identifier), file=sys.stderr)
         return 2
     return 0
+
+
+def cmd_pin_check(args: argparse.Namespace) -> int:
+    """Verify a DEPLOYED standalone copy of one gate/hook against its own tracked source
+    -- see :mod:`interlock.deployment_pinning` for why this exists and what the two
+    comparison bases are (a git gate's rendered shim versus a turn/guard hook's own
+    installed source file).
+    """
+    gate = registry.find_git_gate(args.id)
+    if gate is not None:
+        finding = deployment_pinning.deployed_shim_drift(args.deployed_path, gate.spec.shim)
+        if finding is not None:
+            print(finding, file=sys.stderr)
+            return 1
+        print(f"{args.id}: deployed shim matches the rendered shim")
+        return 0
+
+    hook = registry.find_turn_hook(args.id) or registry.find_guard_hook(args.id)
+    if hook is not None:
+        finding = deployment_pinning.deployed_copy_drift(args.deployed_path, hook.module)
+        if finding is not None:
+            print(finding, file=sys.stderr)
+            return 1
+        print(f"{args.id}: deployed copy matches installed source ({hook.module})")
+        return 0
+
+    print(_unknown_id(args.id), file=sys.stderr)
+    return 2
 
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="interlock",
         description=(
-            "Install, arm, disarm, and report on interlock's git-action and agent-turn "
-            "boundary checks, by one identifier scheme."
+            "Install, arm, disarm, and report on interlock's git-action, agent-turn, and "
+            "pre-execution boundary checks, by one identifier scheme."
         ),
     )
     subparsers = parser.add_subparsers(dest="command", required=True)
@@ -219,6 +295,14 @@ def build_parser() -> argparse.ArgumentParser:
     p_status.add_argument("id", nargs="?", default=None)
     p_status.add_argument("--repository-root", type=Path, default=None)
     p_status.set_defaults(func=cmd_status)
+
+    p_pin = subparsers.add_parser(
+        "pin-check",
+        help="Verify a deployed standalone copy of one gate/hook against its tracked source",
+    )
+    p_pin.add_argument("id")
+    p_pin.add_argument("--deployed-path", type=Path, required=True)
+    p_pin.set_defaults(func=cmd_pin_check)
 
     return parser
 
