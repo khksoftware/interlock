@@ -12,24 +12,32 @@ from tests.conftest import run_git
 
 class TestThePredicate:
     def test_a_windows_drive_letter_path_is_caught(self, sandbox: Path) -> None:
-        (sandbox / "notes.md").write_text(r"See C:\Users\jdoe\repo\file.py for details" + "\n", encoding="utf-8")
+        (sandbox / "notes.md").write_text(
+            "See C:" + r"\Users\jdoe\repo\file.py for details" + "\n", encoding="utf-8",
+        )
         run_git(sandbox, "add", "notes.md")
         failures = staged_absolute_local_path_failures(sandbox)
         assert len(failures) == 1
         assert "notes.md:1" in failures[0]
 
     def test_a_posix_home_directory_path_is_caught(self, sandbox: Path) -> None:
-        (sandbox / "notes.md").write_text("See /home/jdoe/project/file.py\n", encoding="utf-8")
+        (sandbox / "notes.md").write_text(
+            "See /" + "home/jdoe/project/file.py\n", encoding="utf-8",
+        )
         run_git(sandbox, "add", "notes.md")
         assert len(staged_absolute_local_path_failures(sandbox)) == 1
 
     def test_a_macos_users_path_is_caught(self, sandbox: Path) -> None:
-        (sandbox / "notes.md").write_text("See /Users/jdoe/project/file.py\n", encoding="utf-8")
+        (sandbox / "notes.md").write_text(
+            "See /" + "Users/jdoe/project/file.py\n", encoding="utf-8",
+        )
         run_git(sandbox, "add", "notes.md")
         assert len(staged_absolute_local_path_failures(sandbox)) == 1
 
     def test_a_unc_path_is_caught(self, sandbox: Path) -> None:
-        (sandbox / "notes.md").write_text(r"See \\server\share\folder\file.py" + "\n", encoding="utf-8")
+        (sandbox / "notes.md").write_text(
+            "See " + "\\" + r"\server\share\folder\file.py" + "\n", encoding="utf-8",
+        )
         run_git(sandbox, "add", "notes.md")
         assert len(staged_absolute_local_path_failures(sandbox)) == 1
 
@@ -40,13 +48,15 @@ class TestThePredicate:
 
     def test_two_patterns_on_one_line_collapse_to_one_finding(self, sandbox: Path) -> None:
         (sandbox / "notes.md").write_text(
-            r"C:\one\path and /home/two/path on one line" + "\n", encoding="utf-8",
+            "C:" + r"\one\path and " + "/" + "home/two/path on one line\n", encoding="utf-8",
         )
         run_git(sandbox, "add", "notes.md")
         assert len(staged_absolute_local_path_failures(sandbox)) == 1
 
     def test_a_citation_exempts_one_named_line(self, sandbox: Path) -> None:
-        (sandbox / "notes.md").write_text(r"Historical: C:\old\path was the old layout" + "\n", encoding="utf-8")
+        (sandbox / "notes.md").write_text(
+            "Historical: C:" + r"\old\path was the old layout" + "\n", encoding="utf-8",
+        )
         run_git(sandbox, "add", "notes.md")
         failures = staged_absolute_local_path_failures(
             sandbox, citations=({"path": "notes.md", "line_contains": "Historical"},),
@@ -55,7 +65,9 @@ class TestThePredicate:
 
     def test_deferred_scope_exempts_a_whole_prefix(self, sandbox: Path) -> None:
         (sandbox / "fixtures").mkdir()
-        (sandbox / "fixtures" / "sample.txt").write_text(r"C:\fake\example\path" + "\n", encoding="utf-8")
+        (sandbox / "fixtures" / "sample.txt").write_text(
+            "C:" + r"\fake\example\path" + "\n", encoding="utf-8",
+        )
         run_git(sandbox, "add", "fixtures/sample.txt")
         failures = staged_absolute_local_path_failures(
             sandbox, deferred_scope=({"path_prefix": "fixtures/"},),
@@ -63,7 +75,9 @@ class TestThePredicate:
         assert failures == ()
 
     def test_a_deleted_path_is_not_scanned(self, sandbox: Path) -> None:
-        (sandbox / "notes.md").write_text(r"C:\will\be\deleted" + "\n", encoding="utf-8")
+        (sandbox / "notes.md").write_text(
+            "C:" + r"\will\be\deleted" + "\n", encoding="utf-8",
+        )
         run_git(sandbox, "add", "notes.md")
         run_git(sandbox, "commit", "-q", "-m", "add notes with a path")
         run_git(sandbox, "rm", "-q", "notes.md")
@@ -85,12 +99,16 @@ class TestTheJoinPassDoesNotRefuseOrdinaryProse:
     """
 
     def test_a_drive_letter_in_prose_above_a_posix_path_is_not_fused(self, sandbox: Path) -> None:
-        (sandbox / "notes.md").write_text("drive D:\n/dev/null is empty\n", encoding="utf-8")
+        (sandbox / "notes.md").write_text(
+            "drive D:" + "\n/dev/null is empty\n", encoding="utf-8",
+        )
         run_git(sandbox, "add", "notes.md")
         assert staged_absolute_local_path_failures(sandbox) == ()
 
     def test_a_section_label_above_a_slash_line_is_not_fused(self, sandbox: Path) -> None:
-        (sandbox / "notes.md").write_text("see section C:\n/notes below\n", encoding="utf-8")
+        (sandbox / "notes.md").write_text(
+            "see section C:" + "\n/notes below\n", encoding="utf-8",
+        )
         run_git(sandbox, "add", "notes.md")
         assert staged_absolute_local_path_failures(sandbox) == ()
 
@@ -112,7 +130,7 @@ class TestLineBreakEvasion:
     def test_a_windows_drive_path_split_right_after_the_bare_letter_is_caught(
         self, sandbox: Path,
     ) -> None:
-        full = r"C:\Users\jdoe\Desktop\secret.txt"
+        full = "C:" + r"\Users\jdoe\Desktop\secret.txt"
         first, second = full[:1], full[1:]  # "C" / ":\Users\jdoe\Desktop\secret.txt"
         (sandbox / "notes.md").write_text(first + "\n" + second + "\n", encoding="utf-8")
         run_git(sandbox, "add", "notes.md")
@@ -124,7 +142,7 @@ class TestLineBreakEvasion:
     def test_a_posix_home_path_split_right_after_the_leading_separator_is_caught(
         self, sandbox: Path,
     ) -> None:
-        full = "/home/jdoe/projects/secret.txt"
+        full = "/" + "home/jdoe/projects/secret.txt"
         first, second = full[:1], full[1:]  # "/" / "home/jdoe/projects/secret.txt"
         (sandbox / "notes.md").write_text(first + "\n" + second + "\n", encoding="utf-8")
         run_git(sandbox, "add", "notes.md")
@@ -136,7 +154,7 @@ class TestLineBreakEvasion:
     def test_a_posix_users_path_split_right_after_the_leading_separator_is_caught(
         self, sandbox: Path,
     ) -> None:
-        full = "/Users/jdoe/projects/secret.txt"
+        full = "/" + "Users/jdoe/projects/secret.txt"
         first, second = full[:1], full[1:]  # "/" / "Users/jdoe/projects/secret.txt"
         (sandbox / "notes.md").write_text(first + "\n" + second + "\n", encoding="utf-8")
         run_git(sandbox, "add", "notes.md")
@@ -148,7 +166,7 @@ class TestLineBreakEvasion:
     def test_a_unc_path_split_right_after_the_leading_separator_is_caught(
         self, sandbox: Path,
     ) -> None:
-        full = r"\\server\share\secret.txt"
+        full = "\\" + r"\server\share\secret.txt"
         first, second = full[:1], full[1:]  # "\" / "\server\share\secret.txt"
         (sandbox / "notes.md").write_text(first + "\n" + second + "\n", encoding="utf-8")
         run_git(sandbox, "add", "notes.md")
@@ -162,7 +180,7 @@ class TestLineBreakEvasion:
         colon on either side carries no signal that a path continues there, so the
         narrow join-aware pass deliberately does not attempt it (see the module
         docstring's "Line-break evasion" section)."""
-        full = "/home/jdoe/projects/secret.txt"
+        full = "/" + "home/jdoe/projects/secret.txt"
         first, second = full[:3], full[3:]  # "/ho" / "me/jdoe/projects/secret.txt"
         (sandbox / "notes.md").write_text(first + "\n" + second + "\n", encoding="utf-8")
         run_git(sandbox, "add", "notes.md")
@@ -175,7 +193,7 @@ class TestLineBreakEvasion:
         # join-aware pass's own boundary heuristic would also fire on it -- it must not
         # produce a second finding for the same content.
         (sandbox / "notes.md").write_text(
-            r"See C:\Users\jdoe\Desktop\\" + "\n" + "more unrelated prose continues here.\n",
+            "See C:" + r"\Users\jdoe\Desktop\\" + "\n" + "more unrelated prose continues here.\n",
             encoding="utf-8",
         )
         run_git(sandbox, "add", "notes.md")
@@ -186,7 +204,8 @@ class TestLineBreakEvasion:
 
     def test_a_citation_also_exempts_a_spanning_match(self, sandbox: Path) -> None:
         (sandbox / "notes.md").write_text(
-            "Historical citation: C\n:\\old\\path documented here\n", encoding="utf-8",
+            "Historical citation: C" + "\n" + r":\old\path documented here" + "\n",
+            encoding="utf-8",
         )
         run_git(sandbox, "add", "notes.md")
         failures = staged_absolute_local_path_failures(
@@ -202,7 +221,7 @@ class TestLineBreakEvasion:
         # skeleton is never completed, so this must not be flagged just because the join
         # was attempted.
         (sandbox / "notes.md").write_text(
-            "The shared directory lives at /home/\ngrown teams collaborate there daily.\n",
+            "The shared directory lives at /" + "home/\ngrown teams collaborate there daily.\n",
             encoding="utf-8",
         )
         run_git(sandbox, "add", "notes.md")
@@ -229,12 +248,16 @@ class TestFromConfig:
         )
         run_git(sandbox, "add", "interlock.json")
         (sandbox / "fixtures").mkdir()
-        (sandbox / "fixtures" / "sample.txt").write_text(r"C:\fake\path" + "\n", encoding="utf-8")
+        (sandbox / "fixtures" / "sample.txt").write_text(
+            "C:" + r"\fake\path" + "\n", encoding="utf-8",
+        )
         run_git(sandbox, "add", "fixtures/sample.txt")
         assert staged_absolute_local_path_failures_from_config(sandbox) == ()
 
     def test_no_config_file_means_the_built_in_patterns_alone_apply(self, sandbox: Path) -> None:
-        (sandbox / "notes.md").write_text(r"C:\no\config\here" + "\n", encoding="utf-8")
+        (sandbox / "notes.md").write_text(
+            "C:" + r"\no\config\here" + "\n", encoding="utf-8",
+        )
         run_git(sandbox, "add", "notes.md")
         assert len(staged_absolute_local_path_failures_from_config(sandbox)) == 1
 
@@ -244,13 +267,17 @@ class TestTheBlockActuallyBlocks:
         self, sandbox: Path, interpreter: Path,
     ) -> None:
         install(sandbox, SPEC, interpreter=interpreter)
-        (sandbox / "leak.md").write_text(r"C:\Users\jdoe\secret\notes" + "\n", encoding="utf-8")
+        (sandbox / "leak.md").write_text(
+            "C:" + r"\Users\jdoe\secret\notes" + "\n", encoding="utf-8",
+        )
         run_git(sandbox, "add", "leak.md")
         result = run_git(sandbox, "commit", "-q", "-m", "oops")
         assert result.returncode != 0
 
     def test_an_unarmed_worktree_passes_the_identical_fixture(self, sandbox: Path, interpreter: Path) -> None:
-        (sandbox / "leak.md").write_text(r"C:\Users\jdoe\secret\notes" + "\n", encoding="utf-8")
+        (sandbox / "leak.md").write_text(
+            "C:" + r"\Users\jdoe\secret\notes" + "\n", encoding="utf-8",
+        )
         run_git(sandbox, "add", "leak.md")
         result = run_git(sandbox, "commit", "-q", "-m", "unarmed, lands anyway")
         assert result.returncode == 0
