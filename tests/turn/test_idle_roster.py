@@ -120,15 +120,45 @@ def test_custom_session_record_path_is_honoured(sandbox):
     assert decision["decision"] == "block"
 
 
-def test_multi_platform_document_reads_the_first_platform(sandbox):
-    write_session_record(
-        sandbox, roster={"state": "none", "entries": []},
-        queue=[{"id": "PROJ-1", "status": "queued", "sequenced": True}],
-        platform="claude",
-    )
+def test_c2_d01_idle_roster_uses_configured_unique_platform(sandbox):
+    document = {"platforms": [
+        {
+            "platform": "other",
+            "roster": {"state": "enumerated", "entries": [{"id": "worker-a"}]},
+            "queue": [],
+        },
+        {
+            "platform": "default",
+            "roster": {"state": "none", "entries": []},
+            "queue": [{"id": "PROJ-1", "status": "queued", "sequenced": True}],
+        },
+    ]}
+    path = sandbox / ".interlock" / "session_record.json"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(document), encoding="utf-8")
     proc = run_hook_subprocess("idle_roster.py", sandbox, {"stop_hook_active": False})
     decision = json.loads(proc.stdout)
     assert decision["decision"] == "block"
+
+
+def test_c2_d02_unselected_ready_row_cannot_trigger_idle_roster(sandbox):
+    document = {"platforms": [
+        {
+            "platform": "other",
+            "roster": {"state": "none", "entries": []},
+            "queue": [{"id": "PROJ-1", "status": "queued", "sequenced": True}],
+        },
+        {
+            "platform": "default",
+            "roster": {"state": "none", "entries": []},
+            "queue": [],
+        },
+    ]}
+    path = sandbox / ".interlock" / "session_record.json"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(document), encoding="utf-8")
+    proc = run_hook_subprocess("idle_roster.py", sandbox, {"stop_hook_active": False})
+    assert proc.stdout.strip() == ""
 
 
 def test_unarmed_worktree_never_blocks_even_with_a_ready_row_and_empty_roster(sandbox):

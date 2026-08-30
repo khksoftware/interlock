@@ -52,7 +52,43 @@ from interlock.turn import arming, config
 # configures overlapping labels) is matched unambiguously.
 VALID_LABELS = tuple(sorted({config.SUPERVISOR_LABEL, config.WORKER_LABEL}, key=len, reverse=True))
 
-LABEL_RE = re.compile(r"^\s*\[([^\]\n]{0,80})\]")
+LABEL_RE = re.compile(r"\[([^\]\n]{0,80})\]")
+
+
+def _normalized_label_prefix(text: str) -> tuple[str | None, str, int] | None:
+    """Parse one configured plain/bold label and return identity/raw/boundary.
+
+    The normalized identity is ``None`` for a well-shaped but unconfigured
+    bracket label.  The boundary always consumes the closing bold delimiter,
+    so a caller looking for a second label never starts inside the first one.
+    """
+    start = len(text) - len(text.lstrip())
+    bold = text.startswith("**", start)
+    label_start = start + 2 if bold else start
+    match = LABEL_RE.match(text, label_start)
+    if not match:
+        return None
+
+    end = match.end()
+    if bold:
+        if not text.startswith("**", end):
+            return None
+        end += 2
+
+    # A role label is the complete opening shape, not a decorated fragment.
+    # A following label is admitted here only so classify() can report the
+    # more specific blended-label failure through this same parser.
+    if (
+        end < len(text)
+        and not text[end].isspace()
+        and not text.startswith("[", end)
+        and not text.startswith("**[", end)
+    ):
+        return None
+
+    raw = "[" + match.group(1) + "]"
+    identity = raw if raw in VALID_LABELS else None
+    return identity, raw, end
 
 
 def first_visible_text(message_content) -> str:
@@ -148,22 +184,19 @@ def turn_assistant_texts(transcript_path: str):
 
 def classify(text: str):
     """Return None when the message is correctly labelled, else a reason string."""
-    match = LABEL_RE.match(text)
-    if not match:
+    parsed = _normalized_label_prefix(text)
+    if parsed is None:
         return "no role label at the start of the message"
 
-    label = "[" + match.group(1) + "]"
-    if label not in VALID_LABELS:
-        return f"unrecognized role label: {label}"
+    label, raw, boundary = parsed
+    if label is None:
+        return f"unrecognized role label: {raw}"
 
     # A second bracketed label immediately following the first is a blend: two hats in
     # one message.
-    remainder = text[match.end():]
-    second = LABEL_RE.match(remainder)
-    if second:
-        second_label = "[" + second.group(1) + "]"
-        if second_label in VALID_LABELS and second_label != label:
-            return f"two role labels in one message: {label} and {second_label}"
+    second = _normalized_label_prefix(text[boundary:])
+    if second is not None and second[0] is not None:
+        return f"two role labels in one message: {label} and {second[0]}"
 
     return None
 
@@ -190,10 +223,13 @@ def first_message_wrong_channel_failure(texts) -> str | None:
     """
     if not texts:
         return None
-    first = texts[0].lstrip()
-    if first.startswith(config.SUPERVISOR_LABEL):
+    parsed = _normalized_label_prefix(texts[0])
+    if parsed is None:
         return None
-    if first.startswith(config.WORKER_LABEL):
+    identity = parsed[0]
+    if identity == config.SUPERVISOR_LABEL:
+        return None
+    if identity == config.WORKER_LABEL:
         return (
             f"the first message of this turn answers the operator under "
             f"{config.WORKER_LABEL}, and that channel is reserved to "

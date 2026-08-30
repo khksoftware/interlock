@@ -296,7 +296,7 @@ def main() -> int:
     if document is None:
         return 0
 
-    node = sr.platform_node(document)
+    node = sr.platform_node(document, platform=config.SESSION_PLATFORM)
     if node is None:
         return 0
 

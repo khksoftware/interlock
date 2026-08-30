@@ -8,6 +8,24 @@ reminding about, something it did not before) rather than only a Python API.
 
 ## [Unreleased]
 
+## [1.0.0] — 2026-08-30
+
+**Breaking: bare blocker prose no longer suppresses `turn.announced-action` by itself.**
+The hook now corroborates `once`, `await`, `waiting on/for`, `waits on`, and `blocked on`
+against the exact selected platform in the configured session record. The first blocker
+object must fully match the configured id pattern and every id-shaped token in that
+immediate clause must name a row whose portable status is exactly `queued`, `running`,
+or `blocked`. Closed, fabricated, malformed, unknown, wrong-platform, or uncorroborated
+ids retain the announcement and therefore refuse the ending turn. Adopters upgrading
+from 0.2.0 should set `INTERLOCK_SESSION_PLATFORM` (default `default`) and expose those
+portable row statuses in their session record; without a readable unique selected node,
+the hook remains armed and conservative.
+
+Role labels now accept either the configured plain spelling (`[Supervisor]`, `[Worker]`)
+or that exact spelling wrapped in two Markdown bold markers. Both normalize to the same
+identity for strict every-message, blended-label, and first-message channel enforcement;
+other decoration remains invalid.
+
 ## [0.2.0] — 2026-08-27
 
 **Added: `interlock.guard`, a third host — refusals that fire before a command executes.**

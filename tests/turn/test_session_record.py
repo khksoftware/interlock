@@ -5,7 +5,7 @@ from __future__ import annotations
 
 import json
 
-from interlock.turn import session_record as sr
+from interlock.turn import config, session_record as sr
 
 
 class TestPlatformNode:
@@ -14,10 +14,13 @@ class TestPlatformNode:
         node = sr.platform_node(document, platform="claude")
         assert node == {"platform": "claude", "roster": {"x": 1}}
 
-    def test_multi_platform_document_with_no_platform_argument_returns_first(self):
-        document = {"platforms": [{"platform": "codex", "roster": {"x": 1}}]}
-        node = sr.platform_node(document)
-        assert node["platform"] == "codex"
+    def test_c2_p01_default_selector_chooses_default_not_index_zero(self):
+        document = {"platforms": [
+            {"platform": "other", "roster": {"wrong": True}},
+            {"platform": "default", "roster": {"right": True}},
+        ]}
+        assert config.SESSION_PLATFORM == "default"
+        assert sr.platform_node(document, platform=config.SESSION_PLATFORM)["roster"] == {"right": True}
 
     def test_missing_platform_name_returns_none(self):
         document = {"platforms": [{"platform": "codex"}]}
@@ -29,6 +32,128 @@ class TestPlatformNode:
 
     def test_document_with_neither_shape_returns_none(self):
         assert sr.platform_node({"unrelated": True}) is None
+
+
+class TestC2PlatformAndOpenRows:
+    def test_c2_p02_absent_explicit_selector_returns_none(self):
+        assert sr.platform_node({"platforms": [{"platform": "default"}]}, platform="other") is None
+
+    def test_c2_p03_none_selector_returns_none(self):
+        assert sr.platform_node({"platforms": [{"platform": "default"}]}, platform=None) is None
+
+    def test_c2_p04_empty_selector_returns_none(self):
+        assert sr.platform_node({"platforms": [{"platform": "default"}]}, platform="") is None
+
+    def test_c2_p05_padded_selector_returns_none(self):
+        assert sr.platform_node({"platforms": [{"platform": "default"}]}, platform=" default ") is None
+
+    def test_c2_p06_non_string_selector_returns_none(self):
+        assert sr.platform_node({"platforms": [{"platform": "default"}]}, platform=7) is None
+
+    def test_c2_p07_duplicate_selected_platform_is_ambiguous(self):
+        document = {"platforms": [{"platform": "default"}, {"platform": "default"}]}
+        assert sr.platform_node(document, platform="default") is None
+
+    def test_c2_p08_duplicate_unselected_platform_invalidates_population(self):
+        document = {"platforms": [
+            {"platform": "default"}, {"platform": "other"}, {"platform": "other"},
+        ]}
+        assert sr.platform_node(document, platform="default") is None
+
+    def test_c2_p09_non_dict_platform_member_invalidates_population(self):
+        document = {"platforms": [{"platform": "default"}, "other"]}
+        assert sr.platform_node(document, platform="default") is None
+
+    def test_c2_p10_missing_platform_identity_invalidates_population(self):
+        document = {"platforms": [{"platform": "default"}, {}]}
+        assert sr.platform_node(document, platform="default") is None
+
+    def test_c2_p11_non_string_platform_identity_invalidates_population(self):
+        document = {"platforms": [{"platform": "default"}, {"platform": 1}]}
+        assert sr.platform_node(document, platform="default") is None
+
+    def test_c2_p12_empty_platform_identity_invalidates_population(self):
+        document = {"platforms": [{"platform": "default"}, {"platform": ""}]}
+        assert sr.platform_node(document, platform="default") is None
+
+    def test_c2_p13_non_list_platforms_returns_none(self):
+        assert sr.platform_node({"platforms": {}}, platform="default") is None
+
+    def test_c2_p14_top_level_shape_remains_unambiguous(self):
+        document = {"roster": {}, "queue": []}
+        assert sr.platform_node(document, platform=None) is document
+
+    def test_c2_p15_queued_row_is_open(self):
+        assert sr.open_row_ids({"queue": [{"id": "PROJ-1", "status": "queued"}]}) == frozenset({"PROJ-1"})
+
+    def test_c2_p16_running_row_is_open(self):
+        assert sr.open_row_ids({"queue": [{"id": "PROJ-1", "status": "running"}]}) == frozenset({"PROJ-1"})
+
+    def test_c2_p17_blocked_row_is_open(self):
+        assert sr.open_row_ids({"queue": [{"id": "PROJ-1", "status": "blocked"}]}) == frozenset({"PROJ-1"})
+
+    def test_c2_p18_closed_row_is_terminal(self):
+        assert sr.open_row_ids({"queue": [{"id": "PROJ-1", "status": "closed"}]}) == frozenset()
+
+    def test_c2_p19_missing_status_is_not_open(self):
+        assert sr.open_row_ids({"queue": [{"id": "PROJ-1"}]}) == frozenset()
+
+    def test_c2_p20_null_status_is_not_open(self):
+        assert sr.open_row_ids({"queue": [{"id": "PROJ-1", "status": None}]}) == frozenset()
+
+    def test_c2_p21_non_string_status_is_not_open(self):
+        assert sr.open_row_ids({"queue": [{"id": "PROJ-1", "status": 1}]}) == frozenset()
+
+    def test_c2_p22_empty_status_is_not_open(self):
+        assert sr.open_row_ids({"queue": [{"id": "PROJ-1", "status": ""}]}) == frozenset()
+
+    def test_c2_p23_case_variant_status_is_not_open(self):
+        assert sr.open_row_ids({"queue": [{"id": "PROJ-1", "status": "Queued"}]}) == frozenset()
+
+    def test_c2_p24_unknown_status_is_not_open(self):
+        assert sr.open_row_ids({"queue": [{"id": "PROJ-1", "status": "ready"}]}) == frozenset()
+
+    def test_c2_p25_non_list_queue_is_immutable_empty(self):
+        assert sr.open_row_ids({"queue": {}}) == frozenset()
+
+    def test_c2_p26_non_dict_queue_row_is_ignored(self):
+        assert sr.open_row_ids({"queue": [None, "row"]}) == frozenset()
+
+    def test_c2_p27_missing_row_id_is_ignored(self):
+        assert sr.open_row_ids({"queue": [{"status": "queued"}]}) == frozenset()
+
+    def test_c2_p28_empty_row_id_is_ignored(self):
+        assert sr.open_row_ids({"queue": [{"id": "", "status": "queued"}]}) == frozenset()
+
+    def test_c2_p29_backticks_are_stripped(self):
+        assert sr.open_row_ids({"queue": [{"id": "`PROJ-1`", "status": "queued"}]}) == frozenset({"PROJ-1"})
+
+    def test_c2_p30_whitespace_is_stripped(self):
+        assert sr.open_row_ids({"queue": [{"id": "  PROJ-1  ", "status": "queued"}]}) == frozenset({"PROJ-1"})
+
+    def test_c2_p31_ids_are_case_normalized_once(self):
+        node = {"queue": [
+            {"id": "proj-1", "status": "queued"},
+            {"id": "PROJ-1", "status": "running"},
+        ]}
+        assert sr.open_row_ids(node) == frozenset({"PROJ-1"})
+
+    def test_c2_p32_result_is_immutable(self):
+        result = sr.open_row_ids({"queue": [{"id": "PROJ-1", "status": "queued"}]})
+        assert isinstance(result, frozenset)
+        assert not hasattr(result, "add")
+
+    def test_c3_p33_list_status_is_not_open(self):
+        node = {"queue": [{"id": "PROJ-1", "status": ["queued"]}]}
+        assert sr.open_row_ids(node) == frozenset()
+
+    def test_c3_p34_dict_status_is_not_open(self):
+        node = {"queue": [{"id": "PROJ-1", "status": {"value": "queued"}}]}
+        assert sr.open_row_ids(node) == frozenset()
+
+    def test_c3_p35_set_status_is_not_open(self):
+        node = {"queue": [{"id": "PROJ-1", "status": {"queued"}}]}
+        assert sr.open_row_ids(node) == frozenset()
 
 
 class TestRosterIsEmpty:

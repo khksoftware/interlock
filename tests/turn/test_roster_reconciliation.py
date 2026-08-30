@@ -199,6 +199,40 @@ def test_custom_id_pattern_is_honoured(sandbox):
     assert "TICKET#4471" in decision["reason"]
 
 
+def test_c2_d03_reconciliation_uses_configured_unique_platform(sandbox):
+    document = {"platforms": [
+        {"platform": "other", "roster": {"state": "enumerated", "entries": []}, "queue": []},
+        {"platform": "default", "roster": {"state": "enumerated", "entries": []}, "queue": []},
+    ]}
+    path = sandbox / ".interlock" / "session_record.json"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(document), encoding="utf-8")
+    transcript = write_transcript(sandbox, [dispatch_entry("a1", "PROJ-999 unregistered work")])
+    proc = run_hook_subprocess("roster_reconciliation.py", sandbox, {
+        "transcript_path": str(transcript), "stop_hook_active": False,
+    })
+    assert json.loads(proc.stdout)["decision"] == "block"
+
+
+def test_c2_d04_unselected_roster_entry_cannot_satisfy_reconciliation(sandbox):
+    document = {"platforms": [
+        {
+            "platform": "other",
+            "roster": {"state": "enumerated", "entries": [{"id": "PROJ-999"}]},
+            "queue": [],
+        },
+        {"platform": "default", "roster": {"state": "enumerated", "entries": []}, "queue": []},
+    ]}
+    path = sandbox / ".interlock" / "session_record.json"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(document), encoding="utf-8")
+    transcript = write_transcript(sandbox, [dispatch_entry("a1", "PROJ-999 unregistered work")])
+    proc = run_hook_subprocess("roster_reconciliation.py", sandbox, {
+        "transcript_path": str(transcript), "stop_hook_active": False,
+    })
+    assert json.loads(proc.stdout)["decision"] == "block"
+
+
 def test_unarmed_worktree_never_blocks_even_on_the_red_shape(sandbox):
     write_session_record(sandbox, roster={"state": "enumerated", "entries": []}, queue=[])
     transcript = write_transcript(sandbox, [dispatch_entry("a1", "PROJ-999 unregistered work")])

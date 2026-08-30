@@ -115,9 +115,10 @@ hook subprocesses in.
 
 | Variable | Default | Controls |
 |---|---|---|
-| `INTERLOCK_SUPERVISOR_LABEL` | `[Supervisor]` | The role label the operator-facing hat must open every message with. |
-| `INTERLOCK_WORKER_LABEL` | `[Worker]` | The role label a delegated worker's hands-on messages open with. |
-| `INTERLOCK_SESSION_RECORD_PATH` | `.interlock/session_record.json` | Path to the session record `idle_roster.py`/`roster_reconciliation.py` read, relative to the repository root unless absolute. |
+| `INTERLOCK_SUPERVISOR_LABEL` | `[Supervisor]` | The role label the operator-facing hat must open every message with, either plain or wrapped in exactly two bold markers. |
+| `INTERLOCK_WORKER_LABEL` | `[Worker]` | The role label a delegated worker's hands-on messages open with, either plain or wrapped in exactly two bold markers. |
+| `INTERLOCK_SESSION_RECORD_PATH` | `.interlock/session_record.json` | Path to the session record `announced_action.py`, `idle_roster.py`, and `roster_reconciliation.py` read, relative to the repository root unless absolute. |
+| `INTERLOCK_SESSION_PLATFORM` | `default` | Exact, case-sensitive platform node all three record-reading hooks select. Empty, padded, missing-node, duplicate, or malformed identities are a scope miss rather than an index-zero fallback. |
 | `INTERLOCK_QUIESCING_COMMANDS` | `wrap-up,prepare-to-pause` | Comma-separated command/skill names whose recent presence in the transcript suppresses both roster hooks entirely. Empty disables suppression. |
 | `INTERLOCK_ID_PATTERN` | `[A-Z][A-Z0-9]{1,9}-\d{1,6}` | Regular expression (case-insensitive) matching your board/ticket id shape, used by `roster_reconciliation.py`. |
 | `INTERLOCK_SESSION_BOUNDARY_ROWS_PATH` | *(empty)* | Path to a JSON object (`{"id": "reason"}`) of board-item ids `idle_roster.py` should treat as genuinely not dispatchable, relative to the repository root unless absolute. Empty means: fall back to the shared `interlock.json`'s `"turn"` section (see below), then to no exemptions. |
@@ -142,7 +143,7 @@ An explicit `INTERLOCK_SESSION_BOUNDARY_ROWS_PATH` always wins over this fallbac
 
 ### The session record
 
-`idle_roster.py` and `roster_reconciliation.py` both read one JSON file. The simplest
+`announced_action.py`, `idle_roster.py`, and `roster_reconciliation.py` read one JSON file. The simplest
 valid shape, for an adopter with a single agent platform:
 
 ```json
@@ -165,7 +166,9 @@ valid shape, for an adopter with a single agent platform:
 - **`queue`** is a flat list of work rows. A row is dispatchable when `status` is
   `"queued"`, `sequenced` is `true`, and `blocked_on` is absent or empty. `id` is matched
   case-insensitively against `INTERLOCK_ID_PATTERN` when cross-referencing a live
-  dispatch's own free-text description.
+  dispatch's own free-text description. For announced-action blocker corroboration,
+  `queued`, `running`, and `blocked` are the complete open vocabulary; `closed` is
+  terminal, and every missing, malformed, case-variant, or unknown status is not open.
 
 An adopter running more than one agent platform against the same repository wraps the
 same shape per platform:
@@ -179,9 +182,20 @@ same shape per platform:
 }
 ```
 
+Every platform identity must be a unique, non-empty, unpadded string. All three hooks
+select exactly `INTERLOCK_SESSION_PLATFORM`; none infers the first array member. The
+top-level `roster`/`queue` shape remains the unambiguous single-platform fallback.
+
+`announced_action` uses the record only for the bare blocker forms `once`, `await`,
+`waiting on/for`, `waits on`, and `blocked on`. Such a clause suppresses a refusal only
+when its first blocker object fully matches `INTERLOCK_ID_PATTERN` and every id-shaped
+token in that immediate clause is currently open on the selected platform. Without a
+readable record or unique selected node, the hook stays armed and conservative: it
+retains the announcement instead of treating prose alone as proof of a blocker.
+
 Nothing in this package writes this file. Maintaining it is entirely your own
-responsibility; see `docs/INTEGRATION.md` for what happens when it is missing or
-malformed (a silent scope miss, not an error).
+responsibility; see `docs/INTEGRATION.md` for the hook-specific behavior when it is
+missing or malformed.
 
 ### Authoring a new hook of this class
 

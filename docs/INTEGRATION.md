@@ -278,19 +278,26 @@ worktree's marker).
 
 ### The session record
 
-`idle_roster.py` and `roster_reconciliation.py` both read one JSON file — see
+`announced_action.py`, `idle_roster.py`, and `roster_reconciliation.py` read one JSON file — see
 `interlock.turn.session_record`'s own module docstring for its full schema and an
 example. By default this package looks for it at `.interlock/session_record.json`
 relative to the repository root; override the path with `INTERLOCK_SESSION_RECORD_PATH`
 (see `docs/USAGE.md`). Nothing in this package writes that file — maintaining it
 (typically by having your supervisor agent read and rewrite it as part of its own turn) is
 entirely your own responsibility. A missing or malformed record is treated as a scope
-miss (both hooks return cleanly with no output), not an error, but the two hooks provide
-no supervision at all until an equivalent record exists.
+miss by both roster hooks (they return cleanly with no output), not an error. The
+announced-action hook remains armed: an unreadable record is an empty corroboration set,
+so a bare blocker cannot suppress an otherwise-actionable announcement.
 
-**Only these two hooks need the session record.** `role_label`, `announced_action`,
-`subagent_start`, `subagent_stop`, and `user_prompt_submit` have no dependency on it at
-all — you can arm any of those five alone and never create a session-record file.
+Set `INTERLOCK_SESSION_PLATFORM` (default `default`) to the exact case-sensitive platform
+identity all three hooks should read. A multi-platform record must carry unique, valid
+platform identities; no hook infers index zero. See `docs/USAGE.md` for the complete
+open-status and blocker-clause contract.
+
+`role_label`, `subagent_start`, `subagent_stop`, and `user_prompt_submit` remain entirely
+independent of the session record. `announced_action` depends on it only to suppress a
+bare blocker that is corroborated as open; without the record it still performs its
+ordinary conservative check.
 
 ### Verifying the wiring took
 

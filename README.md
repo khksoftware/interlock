@@ -233,8 +233,8 @@ Every gate shares one installer, one arming discipline, and one hook-shim render
 | `subagent_start` | a worker is dispatched | records a best-effort entry in a user-level outstanding-agent registry |
 | `subagent_stop` | a worker returns | removes that entry |
 | `user_prompt_submit` | a new turn begins | reminds (never enforces) the role-label rule and an outstanding-agent live-probe, escalated at resumption boundaries |
-| `role_label` | a turn is ending | refuses if any assistant message of the ending turn lacked exactly one valid role label, or if the turn's first message — the one answering the operator — used the worker label instead of the supervisor's |
-| `announced_action` | a turn is ending | refuses if the turn's final message announces an imminent action with no tool call taking it |
+| `role_label` | a turn is ending | refuses if any assistant message of the ending turn lacked exactly one valid role label (plain `[Supervisor]` and bold `**[Supervisor]**` normalize to the same configured identity), or if the turn's first message — the one answering the operator — used the worker label instead of the supervisor's |
+| `announced_action` | a turn is ending | refuses if the turn's final message announces an imminent action with no tool call taking it; a bare blocker suppresses that refusal only when its immediate clause names open ids in the selected session-record platform |
 | `idle_roster` | a turn is ending | refuses if the roster is verified-empty while a sequenced, unblocked, non-exempt row sits `queued` |
 | `roster_reconciliation` | a turn is ending | refuses if this session's own transcript shows a live, un-notified dispatch missing from the hand-written roster; reports (never refuses on) the reverse mismatch, which carries real cross-session ambiguity |
 
@@ -443,12 +443,14 @@ repository it protects.
 
 ## Design principles, in one place
 
-- **Fail closed on `interlock.git`; fail OPEN on `interlock.turn` — deliberately, not by
+- **Fail closed on `interlock.git`; fail OPEN on ambiguous `interlock.turn` inputs — deliberately, not by
   accident, and this is the sharpest asymmetry between those two hosts.** If a git gate
   cannot determine whether an action is safe, it refuses — an unverifiable action is not a
   verified one (`interlock.errors.GateError`). If a turn-boundary hook cannot read its
-  transcript, its session record, or its payload, it does nothing and blocks nothing. This
-  is not an inconsistency to fix; it reflects a real difference in what a false positive
+  transcript or payload, it does nothing and blocks nothing. The two roster hooks treat a
+  missing or unreadable session record as a scope miss; `announced_action` remains armed
+  and conservative, treating it as an empty corroboration set rather than trusting a bare
+  blocker. This is not an inconsistency to fix; it reflects a real difference in what a false positive
   costs on each side. A blocked commit costs a `--no-verify` and a disclosed note. A
   turn-boundary hook that wedges every turn on any I/O hiccup gets disabled by its own
   operator within a day, and a disabled hook protects nothing at all.

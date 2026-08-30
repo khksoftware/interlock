@@ -40,8 +40,9 @@ turn.announced-action` -- see `arming.py`. Checked before anything else in `main
 import json
 import re
 import sys
+from collections.abc import Collection
 
-from interlock.turn import arming
+from interlock.turn import arming, config, session_record as sr
 
 # --- what an announcement looks like -------------------------------------
 #
@@ -97,16 +98,13 @@ ACTION_VERBS = re.compile(
 # shapes that would otherwise be blocked forever.
 EXCLUSIONS = (
     # Contingent on the operator or on an external event -- correctly not done yet.
-    r"\bonce\b",
     r"\bafter you\b",
     r"\bwhen you\b",
     r"\bif you\b",
     r"\bunless you\b",
     r"\bpending your\b",
-    r"\bawait",
     r"\byour call\b",
     r"\byour (?:word|go-ahead|go ahead|decision|direction|name|pick)\b",
-    r"\bwaiting (?:on|for)\b",
     r"\bbefore (?:you|the operator)\b",
     r"\bon your (?:say|go|instruction|authorization)\b",
     r"\bneeds? your\b",
@@ -118,8 +116,6 @@ EXCLUSIONS = (
     r"\bsay change it\b",
     r"\bapprove\b",
     r"\bauthoriz",
-    r"\bwaits? on\b",
-    r"\bblocked on\b",
     r"\byours to\b",
     # Reporting and standing by -- not a repository/system action.
     r"\breport back\b",
@@ -214,8 +210,27 @@ FENCE_RE = re.compile(r"```.*?```", re.DOTALL)
 INLINE_CODE_RE = re.compile(r"`[^`]*`")
 QUOTE_LINE_RE = re.compile(r"^\s*>.*$", re.MULTILINE)
 
+BLOCKER_FORM_RE = re.compile(
+    r"\b(?:"
+    r"await(?:ing|s|ed)?|"
+    r"wait[ \t]+on|waits[ \t]+on|waiting[ \t]+(?:on|for)|"
+    r"once|blocked[ \t]+on"
+    r")\b",
+    re.IGNORECASE,
+)
+OPERATOR_BLOCKER_EXCLUSION_RE = re.compile(
+    r"\b(?:"
+    r"await(?:ing|s|ed)?|"
+    r"wait[ \t]+on|waits[ \t]+on|waiting[ \t]+(?:on|for)|"
+    r"once|blocked[ \t]+on"
+    r")[ \t]+(?:you\b|your\b)",
+    re.IGNORECASE,
+)
+BLOCKER_CLAUSE_BOUNDARY_RE = re.compile(r"[,;:()[\]\u2013\u2014.!?]")
+TOKEN_EDGE_PUNCTUATION = "`'\".,!?[]{}<>"
 
-def strip_non_prose(text: str) -> str:
+
+def strip_non_prose(text: str, id_pattern: str = config.ID_PATTERN) -> str:
     """Remove content that quotes rather than asserts.
 
     Load-bearing rather than cosmetic: this rule's own statement, and any example of the
@@ -226,7 +241,25 @@ def strip_non_prose(text: str) -> str:
     """
     text = FENCE_RE.sub(" ", text)
     text = QUOTE_LINE_RE.sub(" ", text)
-    text = INLINE_CODE_RE.sub(" ", text)
+
+    try:
+        identifier_re = re.compile(id_pattern, re.IGNORECASE)
+    except (TypeError, re.error):
+        identifier_re = None
+
+    def replace_inline(match: re.Match) -> str:
+        if identifier_re is not None:
+            prefix = text[:match.start()]
+            blockers = tuple(BLOCKER_FORM_RE.finditer(prefix))
+            if blockers and not prefix[blockers[-1].end():].strip():
+                inner = match.group(0)[1:-1]
+                if identifier_re.fullmatch(inner):
+                    return inner
+        # Keep a non-id-shaped lexical placeholder so removing an example cannot
+        # promote a later token into the immediate blocker-object position.
+        return " <inline-code> "
+
+    text = INLINE_CODE_RE.sub(replace_inline, text)
     return text
 
 
@@ -247,21 +280,64 @@ def sentences(text: str):
                 yield part
 
 
-def announced_actions(text: str):
+def _corroborated_blocker_clause(
+    sentence: str,
+    open_ids: Collection[str] | None,
+    id_pattern: str,
+) -> bool:
+    """Whether a bare blocker clause names only currently-open exact ids."""
+    try:
+        identifier_re = re.compile(id_pattern, re.IGNORECASE)
+    except (TypeError, re.error):
+        return False
+
+    normalized_open = frozenset(
+        value.strip().strip("`").strip().upper()
+        for value in (open_ids or ())
+        if isinstance(value, str) and value.strip().strip("`").strip()
+    )
+    if not normalized_open:
+        return False
+
+    for blocker in BLOCKER_FORM_RE.finditer(sentence):
+        suffix = sentence[blocker.end():].lstrip()
+        boundary = BLOCKER_CLAUSE_BOUNDARY_RE.search(suffix)
+        clause = suffix[:boundary.start()] if boundary else suffix
+        tokens = [token.strip(TOKEN_EDGE_PUNCTUATION) for token in clause.split()]
+        tokens = [token for token in tokens if token]
+        if not tokens or identifier_re.fullmatch(tokens[0]) is None:
+            continue
+        shaped = [token.upper() for token in tokens if identifier_re.fullmatch(token)]
+        if shaped and all(identifier in normalized_open for identifier in shaped):
+            return True
+    return False
+
+
+def announced_actions(
+    text: str,
+    *,
+    open_row_ids: Collection[str] | None = None,
+    id_pattern: str = config.ID_PATTERN,
+) -> list[str]:
     """Return sentences that announce an imminent, un-taken action."""
     hits = []
-    for sentence in sentences(strip_non_prose(text)):
+    for sentence in sentences(strip_non_prose(text, id_pattern=id_pattern)):
         if sentence.endswith("?"):
             continue
-        if EXCLUSION_RE.search(sentence):
+        if EXCLUSION_RE.search(sentence) or OPERATOR_BLOCKER_EXCLUSION_RE.search(sentence):
             continue
+        corroborated = _corroborated_blocker_clause(
+            sentence, open_row_ids, id_pattern
+        )
         lead = LEAD_RE.search(sentence)
         if lead:
             if ACTION_VERBS.search(sentence):
-                hits.append(sentence)
+                if not corroborated:
+                    hits.append(sentence)
             continue
         if GERUND_LEAD.match(sentence) and not GERUND_REPORT.match(sentence):
-            hits.append(sentence)
+            if not corroborated:
+                hits.append(sentence)
     return hits
 
 
@@ -358,7 +434,18 @@ def main() -> int:
     if not text:
         return 0
 
-    hits = announced_actions(text)
+    open_ids = frozenset()
+    root = sr.repository_root()
+    if root is not None:
+        document = sr.load_record(config.resolved_session_record_path(root))
+        node = sr.platform_node(document, platform=config.SESSION_PLATFORM)
+        open_ids = sr.open_row_ids(node)
+
+    hits = announced_actions(
+        text,
+        open_row_ids=open_ids,
+        id_pattern=config.ID_PATTERN,
+    )
     if not hits:
         return 0
 

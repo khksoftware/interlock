@@ -52,6 +52,11 @@ SESSION_RECORD_PATH = os.environ.get(
     "INTERLOCK_SESSION_RECORD_PATH", ".interlock/session_record.json"
 )
 
+# The exact platform node turn hooks read from a multi-platform session record.
+# Missing configuration is deliberately generic; an explicitly empty or padded
+# value remains malformed and is refused by `session_record.platform_node`.
+SESSION_PLATFORM = os.environ.get("INTERLOCK_SESSION_PLATFORM", "default")
+
 # --- quiescing commands ---------------------------------------------------------------
 #
 # Command or skill names that, when seen recently in the transcript, mean the session is

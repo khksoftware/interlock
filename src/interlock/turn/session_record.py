@@ -59,6 +59,10 @@ from pathlib import Path
 from interlock.plumbing import repository_root as _repository_root
 
 
+OPEN_ROW_STATUSES = frozenset({"queued", "running", "blocked"})
+TERMINAL_ROW_STATUSES = frozenset({"closed"})
+
+
 def repository_root(cwd: str | None = None) -> Path | None:
     """The repository this hook is being asked about, resolved from git. Never raises.
 
@@ -83,22 +87,68 @@ def load_record(path: Path) -> dict | None:
 def platform_node(document: dict, platform: str | None = None) -> dict | None:
     """This platform's node, or None when the record has none.
 
-    A record carrying a `platforms` list is searched by name (first entry when
-    `platform` is None). A record with no `platforms` key at all is treated as a
-    single-platform document and returned as-is -- the documented fallback for an
-    adopter who does not need the multi-platform wrapper.
+    A record carrying `platforms` requires one valid, unique exact-name match.
+    It never infers index zero. A record with no `platforms` key at all is
+    treated as a single-platform document and returned as-is -- the documented
+    fallback for an adopter who does not need the multi-platform wrapper.
     """
-    platforms = document.get("platforms")
-    if isinstance(platforms, list):
+    if not isinstance(document, dict):
+        return None
+    if "platforms" in document:
+        platforms = document.get("platforms")
+        if not isinstance(platforms, list):
+            return None
+        if not isinstance(platform, str) or not platform or platform.strip() != platform:
+            return None
+
+        identities: list[str] = []
         for node in platforms:
             if not isinstance(node, dict):
-                continue
-            if platform is None or node.get("platform") == platform:
-                return node
+                return None
+            identity = node.get("platform")
+            if (
+                not isinstance(identity, str)
+                or not identity
+                or identity.strip() != identity
+            ):
+                return None
+            identities.append(identity)
+        if len(identities) != len(set(identities)):
+            return None
+
+        matches = [node for node in platforms if node["platform"] == platform]
+        if len(matches) == 1:
+            return matches[0]
         return None
     if "roster" in document or "queue" in document:
         return document
     return None
+
+
+def open_row_ids(node: dict | None) -> frozenset[str]:
+    """Return case-normalized ids whose portable status is exactly open."""
+    if not isinstance(node, dict):
+        return frozenset()
+    queue = node.get("queue")
+    if not isinstance(queue, list):
+        return frozenset()
+
+    identifiers: set[str] = set()
+    for row in queue:
+        if not isinstance(row, dict):
+            continue
+        status = row.get("status")
+        identifier = row.get("id")
+        if (
+            not isinstance(status, str)
+            or status not in OPEN_ROW_STATUSES
+            or not isinstance(identifier, str)
+        ):
+            continue
+        normalized = identifier.strip().strip("`").strip()
+        if normalized:
+            identifiers.add(normalized.upper())
+    return frozenset(identifiers)
 
 
 def roster_is_empty(node: dict) -> bool:
