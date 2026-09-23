@@ -83,13 +83,36 @@ import argparse
 from datetime import datetime, timedelta, timezone
 import hashlib
 import json
+import os
 import re
 import sys
+import time
+import uuid
+import warnings
 from typing import Mapping
 
 from interlock.guard import arming, config
 
 SCHEMA = "interlock-guard-command-cost-approval/1.0"
+
+#: What :func:`record_approval` writes into ``approved_under``, and what
+#: :func:`consume_approval` requires to find there.
+#:
+#: **This is a cited rule, never a claim about who approved.** The field it replaced,
+#: ``approved_by: "explicit-user-authorization"``, read as an attestation that a person
+#: authorised the command -- and it was never that. This guard has no channel to the user
+#: that the calling agent does not also control: the same process just refused can invoke
+#: the approval path itself, supply any text it likes for the reason, the alternatives and
+#: the baseline plan, and the record is written and later accepted with no differently-
+#: privileged party involved at any point. The single use, the SHA-256 binding and the
+#: expiry are real and are not in question; only the claim the old field's NAME made was
+#: false. So the field answers *which rule licenses this record's existence*, never *who
+#: approved it*.
+#:
+#: The value is kept identical to the host hook's own label deliberately: the two copies
+#: of this guard are compared against each other by contract, and a rename that reached
+#: only one of them is the defect this change repairs.
+APPROVAL_RULE_LABEL = "rule: explicit user authorization required before recording"
 
 #: Tool names whose ``command``/``cmd``/``source``/``script`` input field is a shell
 #: command string this hook can meaningfully scan. A payload under any other tool name
@@ -512,13 +535,172 @@ def _parse_timestamp(value: object) -> datetime | None:
     return parsed if parsed.tzinfo is not None else None
 
 
-def _atomic_json(path, payload: Mapping[str, object]) -> None:
-    import os
+# --- shared-target atomic replace -------------------------------------------------------
+#
+# Self-contained on purpose. This distribution declares no dependencies, and this hook is
+# invoked by an adopter's harness as a subprocess at a ``PreToolUse``-shaped boundary, so
+# everything it needs at import time is either the standard library or this package's own
+# source. Nothing below imports anything outside it, and nothing below is reachable only
+# through a host subpackage.
+#
+# The hazard: on Windows, ``os.replace`` onto a target another process holds open -- EVEN
+# FOR READ -- is refused with ``PermissionError`` whose ``winerror`` is 5. The refusal is
+# transient and unrelated to the content of either file, so an approval receipt written
+# while a concurrent invocation happens to be reading it back fails for a reason that has
+# nothing to do with the write being attempted. :func:`record_approval` writes exactly such
+# a target and :func:`consume_approval` is exactly such a reader. On every other platform
+# ``winerror`` does not exist, the retry below re-raises on the first refusal, and this
+# helper is a faithful pass-through that claims nothing.
+# ----------------------------------------------------------------------------------------
 
+
+REPLACE_MAX_ATTEMPTS = 6
+REPLACE_BACKOFF_SECONDS = 0.05
+
+
+class ReplaceNotApplied(PermissionError):
+    """`replace_with_retry_verified` exhausted its retries and confirmed, by reading
+    `target` back, that it does NOT carry the bytes `source` held: the replace genuinely
+    did not apply. A `PermissionError` subclass, so the `except OSError` idiom an atomic
+    writer's caller already uses catches it unchanged."""
+
+
+class ReplaceVerificationError(OSError):
+    """`replace_with_retry_verified` exhausted its retries, and reading `target` back to
+    tell whether the replace actually landed ITSELF failed: whether the write applied is
+    genuinely unknown and needs a manual check.
+
+    **An `OSError` subclass, and that is not cosmetic.** A sibling implementation of this
+    helper once derived this class from `RuntimeError` while `ReplaceNotApplied` derived
+    from `PermissionError`; the asymmetry meant a caller writing `except OSError` -- the
+    ordinary idiom around an atomic write -- handled one outcome of one function and let
+    the other escape unwrapped, past its own error contract. Two outcomes of one call must
+    share one base. A caller that still wants to special-case "this needs a manual check"
+    catches this class explicitly BEFORE a broader `except OSError`."""
+
+
+class ReplaceVerificationSkipped(RuntimeWarning):
+    """`replace_with_retry_verified` could not read `source` before attempting the
+    replace, so it has no bytes to compare `target` against afterward -- verification
+    is impossible, not merely inconclusive.
+
+    The replace is still attempted rather than refused: `os.replace` does not need the
+    same access `open()` for read does, and a real lock reproduces exactly this split --
+    a source opened with share flags that deny read but still permit rename (measured
+    on this platform: `open(source, "rb")` raises `PermissionError` while
+    `os.replace(source, target)` succeeds outright). Refusing here would turn a call
+    that works today into a hard failure for no corresponding safety gain.
+
+    But the function's entire contract is verification, and none can happen once
+    `source` is unreadable, so silently returning exactly as a verified success would
+    is its own defect (`ENG-00736`). This warning is the signal available in its
+    place: a `PreToolUse` hook may depend on no logger and may import nothing beyond
+    the standard library, and `warnings.warn` is part of it. By default Python prints
+    an unhandled warning once to stderr; a caller that wants to notice
+    programmatically wraps the call in `warnings.catch_warnings(record=True)`."""
+
+
+def replace_with_retry(source, target) -> None:
+    """`os.replace`, retrying only the transient refusal of a rename onto a target another
+    process holds open.
+
+    On Windows that refusal is `PermissionError` with `winerror == 5`, raised even when the
+    holder opened the target for READ only; it is unrelated to the content of either file
+    and is never by itself evidence of a torn state. `winerror` does not exist on other
+    platforms, so `getattr(error, "winerror", None) != 5` re-raises immediately there and
+    this function is a faithful pass-through -- it adds a Windows-specific retry and claims
+    nothing anywhere else."""
+    attempt = 0
+    while True:
+        try:
+            os.replace(source, target)
+            return
+        except PermissionError as error:
+            attempt += 1
+            if getattr(error, "winerror", None) != 5 or attempt >= REPLACE_MAX_ATTEMPTS:
+                raise
+            time.sleep(REPLACE_BACKOFF_SECONDS * attempt)
+
+
+def replace_with_retry_verified(source, target) -> None:
+    """`replace_with_retry`, plus the classification a bare refusal cannot give.
+
+    When the retries are exhausted, a raised `PermissionError` on its own cannot
+    distinguish "genuinely did not apply" from "applied despite the raise" from "unknown,
+    because checking which of those two is true itself failed." The third is a real state
+    and the second has been observed for real: a write whose caller saw a traceback and a
+    non-zero exit for an operation that had in fact completed, and re-ran it.
+
+    `source`'s own on-disk bytes are read BEFORE the replace is attempted -- the literal
+    bytes that land on `target` if it succeeds -- so verification never depends on the
+    caller re-deriving what it wrote from its own text, JSON, encoding or newline choices.
+
+    - Success, immediately or after a retry: returns normally. Unchanged from a bare
+      `os.replace` for the overwhelming majority of calls.
+    - Retries exhausted, and `target` now holds exactly what `source` held: the replace did
+      land despite the raised error. Returns normally rather than raising.
+    - Retries exhausted, and `target`'s bytes differ: raises `ReplaceNotApplied`.
+    - Retries exhausted, and reading `target` back itself raises: raises
+      `ReplaceVerificationError`.
+    - Anything else `replace_with_retry` lets through propagates unchanged. This function
+      interposes only on the one refusal `replace_with_retry` itself retries and can
+      exhaust.
+
+    Accepts `str` or any `os.PathLike` for both operands, and reads through `open()` rather
+    than a `pathlib` method, so it imposes no import of its own beyond `os`, `time` and
+    `warnings` -- all three standard library ("`replace_with_retry_verified` could not
+    read `source`" is signalled with a `ReplaceVerificationSkipped` warning rather than
+    silently degrading; see that class's docstring)."""
+    try:
+        with open(source, "rb") as handle:
+            intended = handle.read()
+    except OSError as read_error:
+        # `source` is not readable before a replace was even attempted -- not a case this
+        # function's verification should interpret, and not evidence the replace itself is
+        # in trouble: `os.replace` does not require read access to `source`, measured
+        # against a real lock that denies one and not the other (`ENG-00736`). Let the
+        # replace raise whatever `os.replace` itself raises rather than mask it with a
+        # verification error about a replace that was never reached -- but say so LOUDLY
+        # first: this function's whole contract is verification, none can happen here, and
+        # returning silently would be indistinguishable from a verified success.
+        warnings.warn(
+            f"replace_with_retry_verified: {source} could not be read before replacing "
+            f"{target} ({read_error}); proceeding WITHOUT verification.",
+            ReplaceVerificationSkipped,
+            stacklevel=2,
+        )
+        replace_with_retry(source, target)
+        return
+    try:
+        replace_with_retry(source, target)
+        return
+    except PermissionError as error:
+        if getattr(error, "winerror", None) != 5:
+            raise
+        try:
+            with open(target, "rb") as handle:
+                current = handle.read()
+        except OSError as read_error:
+            raise ReplaceVerificationError(
+                f"os.replace of {source} onto {target} was refused after "
+                f"{REPLACE_MAX_ATTEMPTS} attempts, and reading {target} back to tell "
+                f"whether the replace actually landed itself failed: {read_error}. "
+                f"Whether this write applied is unknown; it needs a manual check."
+            ) from read_error
+        if current == intended:
+            return
+        raise ReplaceNotApplied(
+            f"os.replace of {source} onto {target} was refused after "
+            f"{REPLACE_MAX_ATTEMPTS} attempts, and read-back confirms {target} does not "
+            f"carry the bytes {source} held -- the replace did not apply."
+        ) from error
+
+
+def _atomic_json(path, payload: Mapping[str, object]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     temporary = path.with_name(f".{path.name}.{os.getpid()}.tmp")
     temporary.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8", newline="\n")
-    os.replace(temporary, path)
+    replace_with_retry_verified(temporary, path)
 
 
 def record_approval(
@@ -538,7 +720,12 @@ def record_approval(
     payload = {
         "schema": SCHEMA,
         "command_sha256": sha256.upper(),
-        "approved_by": "explicit-user-authorization",
+        # NOT A CLAIM ABOUT WHO APPROVED. This guard has no channel to the user that the
+        # calling agent does not also control, so this field records the RULE the record
+        # is written under, never a verified fact. The single use, the SHA binding and the
+        # expiry below are real; the authorization is asserted, not verified. See
+        # :data:`APPROVAL_RULE_LABEL` for the full account.
+        "approved_under": APPROVAL_RULE_LABEL,
         "reason": reason.strip(),
         "alternatives_considered": alternatives.strip(),
         "baseline_reuse_plan": baseline_plan.strip(),
@@ -554,33 +741,79 @@ def record_approval(
 
 
 def consume_approval(sha256: str) -> bool:
+    # ENG-00734: single-use no longer rests on "the source was renamed away" -- measured
+    # (ENV-TWO-CONCURRENT-OS-REPLACE-CALLS-ONTO-ONE-TARGET-CAN-BOTH-SUCCEED-ON-WINDOWS) two
+    # real processes racing `os.replace` on the SAME source both return success in 9 of 10
+    # trials. Single-use now rests on "exactly one caller can create this path"
+    # (`O_CREAT|O_EXCL`), which is the trap registry's own `safe_alternative` for this trap,
+    # measured exclusive in 20 of 20 four-racer trials. The rename below is retained only as
+    # a best-effort cleanup of the source; it is NOT the safety mechanism.
+    #
+    # Repaired 2026-09-22: this copy now writes and
+    # requires `approved_under` under the same label the host hook uses. It previously
+    # kept the retired `approved_by`, and the comment here said so and deferred the fix.
+    # A receipt written by an older copy no longer validates -- deliberately, because that
+    # receipt carries the very attestation claim the relabel exists to withdraw, and these
+    # receipts are single-use with an expiry measured in minutes, so the window in which
+    # one can exist at all is bounded by its own design.
     path = config.state_root() / "approvals" / f"{sha256}.json"
     try:
         payload = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
         return False
     expires_at = _parse_timestamp(payload.get("expires_at"))
+    created_at = _parse_timestamp(payload.get("created_at"))
     valid = (
         payload.get("schema") == SCHEMA
         and payload.get("command_sha256") == sha256
-        and payload.get("approved_by") == "explicit-user-authorization"
+        and payload.get("approved_under") == APPROVAL_RULE_LABEL
         and payload.get("uses_remaining") == 1
         and expires_at is not None
         and expires_at > _utc_now()
+        and created_at is not None
         and all(str(payload.get(key, "")).strip() for key in (
             "reason", "alternatives_considered", "baseline_reuse_plan"
         ))
     )
     if not valid:
         return False
-    import os
-
-    consumed = config.state_root() / "consumed" / f"{sha256}.{int(_utc_now().timestamp())}.json"
+    # The claim key is the approval's own `created_at`, PARSED then reformatted from the
+    # parsed datetime's own components -- no payload text ever reaches a path -- at
+    # microsecond granularity, measured 5/5 distinct across back-to-back records in one
+    # process. This also closes the audit-overwrite defect in today's whole-second key
+    # (`int(_utc_now().timestamp())`): on the now-impossible collision, `O_EXCL` REFUSES
+    # rather than silently overwriting the earlier consumption record.
+    key = created_at.strftime("%Y%m%dT%H%M%S.%f")
+    consumed = config.state_root() / "consumed" / f"{sha256}.{key}.json"
     consumed.parent.mkdir(parents=True, exist_ok=True)
+    token = uuid.uuid4().hex
+    stamp = dict(payload)
+    stamp["consumed_at"] = _utc_now().isoformat().replace("+00:00", "Z")
+    stamp["consumed_claim_token"] = token
     try:
-        os.replace(path, consumed)
+        # THE CLAIM. One syscall. Catch ANY OSError, not just `FileExistsError`: an existing
+        # DIRECTORY at this claim path measures `PermissionError` errno 13 on this platform,
+        # not `FileExistsError`.
+        handle = os.open(str(consumed), os.O_CREAT | os.O_EXCL | os.O_WRONLY)
     except OSError:
         return False
+    try:
+        os.write(handle, (json.dumps(stamp, indent=2, sort_keys=True) + "\n").encode("utf-8"))
+    finally:
+        os.close(handle)
+    # Defence in depth, kept from the trap registry's own remedy: measured (ENG-00734
+    # design, M2b) to change no outcome over the primitive alone, in case some future state
+    # directory's filesystem does not honour exclusive create the way this one does.
+    try:
+        written = json.loads(consumed.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return False
+    if written.get("consumed_claim_token") != token:
+        return False
+    try:
+        path.unlink()  # best effort. NOT the safety mechanism -- see the module note above.
+    except OSError:
+        pass
     return True
 
 

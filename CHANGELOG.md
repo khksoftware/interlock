@@ -8,6 +8,39 @@ reminding about, something it did not before) rather than only a Python API.
 
 ## [Unreleased]
 
+## [2.0.0] — 2026-09-22
+
+**Breaking: the approval receipt's `approved_by` field is renamed to `approved_under`, and
+a receipt written by 1.0.0 no longer validates.** Re-request any approval that is still in
+flight after upgrading; these receipts are single-use with an expiry between 1 and 1440
+minutes, so the window in which one can exist at all is bounded by its own design.
+
+The old field's value, `explicit-user-authorization`, read as an attestation that a person
+authorised the command. **It was never that.** This guard has no channel to the user that the
+calling agent does not also control: the identical process just refused can invoke the
+approval path itself, supply any text it likes for the reason, the alternatives and the
+baseline plan, and the record is written and later accepted with no differently-privileged
+party involved at any point. The single use, the SHA-256 binding and the expiry are real and
+are not in question — only the claim the field's NAME made was false.
+
+The field now carries a cited rule rather than a claimed fact: `APPROVAL_RULE_LABEL`,
+currently `"rule: explicit user authorization required before recording"`. It answers *which
+rule licenses this record's existence*, never *who approved it*, and the constant's own
+docstring says so at the point anyone would read to find out what the field means.
+
+**Why this is MAJOR rather than a rename.** A previously-valid receipt is now refused, which
+is precisely what this package's own release policy classifies as breaking: a change that
+makes a previously-passing action refused by default. Nothing about the signature surface
+changed.
+
+**Also: an atomic-replace retry, and two exception types for its outcomes.** Replacing a
+receipt that another process holds open — even for read — is refused on Windows with a
+transient error unrelated to either file's content, and a receipt is exactly such a target
+while a concurrent reader consumes it. The retry re-raises unchanged on every other platform.
+`ReplaceNotApplied` says the write provably did not land; `ReplaceVerificationError` says
+whether it landed could not be determined. Both derive from `OSError`, so the ordinary
+`except OSError` idiom around an atomic write catches either unchanged.
+
 ## [1.0.0] — 2026-08-30
 
 **Breaking: bare blocker prose no longer suppresses `turn.announced-action` by itself.**

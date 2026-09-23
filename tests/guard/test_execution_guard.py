@@ -15,10 +15,31 @@ import os
 from pathlib import Path
 import subprocess
 import sys
+import time
 
 import pytest
 
 from interlock.guard import arming, execution_guard as hook
+
+
+def _hold_open(target: Path, seconds: float):
+    """Open `target` for read from a second thread and release it after `seconds`. Module
+    level -- rather than the `_held` staticmethod on `TestAtomicWriteSurvivesAConcurrent
+    Reader` below -- so `ENG-00734`'s new claim-primitive tests can use it without reaching
+    into another class."""
+    import threading
+
+    opened = threading.Event()
+
+    def hold() -> None:
+        with open(target, "rb"):
+            opened.set()
+            time.sleep(seconds)
+
+    thread = threading.Thread(target=hold, daemon=True)
+    thread.start()
+    assert opened.wait(5.0), "the holding thread never opened the target"
+    return thread
 
 
 class TestCommandExtraction:
@@ -380,3 +401,354 @@ class TestArmingDiscipline:
     def test_unknown_hook_key_raises(self) -> None:
         with pytest.raises(ValueError):
             arming.marker_name_for("does-not-exist")
+
+
+class TestAtomicWriteSurvivesAConcurrentReader:
+    """The approval receipt is a shared target: :func:`record_approval` writes it while a
+    concurrent invocation's :func:`consume_approval` may hold it open for read.
+
+    On Windows a rename onto a handle another reader holds -- even a read-only handle -- is
+    refused with ``PermissionError`` and ``winerror == 5``. The refusal is transient and says
+    nothing about either file's content, so the write must retry rather than fail. The
+    platform-dependent proofs below are skipped elsewhere and say so; the contract tests
+    above them run everywhere, because an adopter on any platform depends on the two failure
+    outcomes sharing one base class.
+    """
+
+    WINDOWS_ONLY = pytest.mark.skipif(
+        sys.platform != "win32",
+        reason="the refusal this retries is a Windows rename-onto-an-open-handle behaviour; "
+               "on other platforms the helper is a deliberate pass-through and there is no "
+               "refusal to survive",
+    )
+
+    @staticmethod
+    def _held(target: Path, seconds: float):
+        """Open ``target`` for read from a second thread and release it after ``seconds``.
+        A real handle, not a patched call: the refusal under test is the platform's."""
+        import threading
+        import time
+
+        opened = threading.Event()
+
+        def hold() -> None:
+            with open(target, "rb"):
+                opened.set()
+                time.sleep(seconds)
+
+        thread = threading.Thread(target=hold, daemon=True)
+        thread.start()
+        assert opened.wait(5.0), "the holding thread never opened the target"
+        return thread
+
+    @staticmethod
+    def _pair(tmp_path: Path, *, target_bytes: bytes = b"before\n") -> tuple[Path, Path]:
+        source = tmp_path / "source.tmp"
+        source.write_bytes(b"after\n")
+        target = tmp_path / "target.json"
+        target.write_bytes(target_bytes)
+        return source, target
+
+    def test_both_failure_outcomes_share_one_base_so_one_except_clause_catches_both(self) -> None:
+        """The asymmetry this asserts against is a real defect, not a hypothetical: a sibling
+        implementation of this helper once raised one outcome as an ``OSError`` subclass and
+        the other as a ``RuntimeError``, so a caller's ``except OSError`` handled one and let
+        the other escape its own error contract."""
+        assert issubclass(hook.ReplaceNotApplied, OSError)
+        assert issubclass(hook.ReplaceVerificationError, OSError)
+        assert issubclass(hook.ReplaceNotApplied, PermissionError)
+
+    def test_the_retry_budget_is_bounded_and_stated(self) -> None:
+        assert hook.REPLACE_MAX_ATTEMPTS == 6
+        assert hook.REPLACE_BACKOFF_SECONDS == 0.05
+
+    def test_an_uncontended_replace_lands_and_returns_nothing(self, tmp_path: Path) -> None:
+        source, target = self._pair(tmp_path)
+        assert hook.replace_with_retry_verified(source, target) is None
+        assert target.read_bytes() == b"after\n"
+        assert not source.exists()
+
+    @WINDOWS_ONLY
+    def test_a_bare_replace_under_the_identical_hold_is_refused(self, tmp_path: Path) -> None:
+        """The RED the rest of this class is measured against. Without it, a green below
+        could mean the hold never reproduced the refusal at all."""
+        source, target = self._pair(tmp_path)
+        thread = self._held(target, 0.6)
+        try:
+            with pytest.raises(PermissionError) as caught:
+                os.replace(source, target)
+            assert caught.value.winerror == 5
+        finally:
+            thread.join(timeout=10.0)
+
+    @WINDOWS_ONLY
+    def test_a_transient_hold_on_the_target_is_survived(self, tmp_path: Path) -> None:
+        source, target = self._pair(tmp_path)
+        thread = self._held(target, 0.20)
+        try:
+            hook.replace_with_retry_verified(source, target)
+        finally:
+            thread.join(timeout=10.0)
+        assert target.read_bytes() == b"after\n"
+
+    @WINDOWS_ONLY
+    def test_a_hold_outlasting_the_budget_raises_and_leaves_the_target_untouched(
+        self, tmp_path: Path,
+    ) -> None:
+        source, target = self._pair(tmp_path)
+        thread = self._held(target, 1.2)
+        try:
+            with pytest.raises(hook.ReplaceNotApplied):
+                hook.replace_with_retry_verified(source, target)
+        finally:
+            thread.join(timeout=10.0)
+        assert target.read_bytes() == b"before\n"
+
+    @WINDOWS_ONLY
+    def test_a_write_that_is_already_present_is_reported_as_success_not_as_a_failure(
+        self, tmp_path: Path,
+    ) -> None:
+        """The partial-observability case, reproduced by its observable state rather than by
+        the race that produces it: the retries genuinely exhaust against a real refusal, and
+        the target already carries exactly what the source held. Forcing the platform to both
+        apply a rename and report it refused has no deterministic trigger; what this helper
+        owns is the read-back-and-compare that follows, and that is what this proves."""
+        source, target = self._pair(tmp_path, target_bytes=b"after\n")
+        thread = self._held(target, 1.2)
+        try:
+            assert hook.replace_with_retry_verified(source, target) is None
+        finally:
+            thread.join(timeout=10.0)
+
+    @WINDOWS_ONLY
+    def test_a_target_that_cannot_be_read_back_raises_the_verification_outcome(
+        self, tmp_path: Path,
+    ) -> None:
+        """A directory standing where the target belongs: the refusal is permanent rather
+        than transient, the retries correctly give up, and reading the target back to
+        classify the outcome itself fails. The caller is told so explicitly."""
+        source = tmp_path / "source.tmp"
+        source.write_bytes(b"after\n")
+        target = tmp_path / "target.json"
+        target.mkdir()
+        with pytest.raises(hook.ReplaceVerificationError):
+            hook.replace_with_retry_verified(source, target)
+
+    @WINDOWS_ONLY
+    def test_an_unreadable_source_with_a_still_renamable_target_degrades_loudly(
+        self, tmp_path: Path,
+    ) -> None:
+        """`ENG-00736`: the file-site silent degradation. A source held under a REAL
+        lock that denies read but permits rename (``open(source, "rb")`` fails,
+        ``os.replace`` does not) used to make ``replace_with_retry_verified`` return
+        exactly as a verified success would, with nothing telling the caller
+        verification never happened. Proven against a real held-open lock, not a
+        patched call."""
+        import ctypes
+        import warnings
+        from ctypes import wintypes
+
+        source, target = self._pair(tmp_path)
+        generic_read = 0x80000000
+        file_share_delete = 0x00000004
+        open_existing = 3
+        file_attribute_normal = 0x80
+        create_file = ctypes.windll.kernel32.CreateFileW
+        create_file.argtypes = [
+            wintypes.LPCWSTR, wintypes.DWORD, wintypes.DWORD, wintypes.LPVOID,
+            wintypes.DWORD, wintypes.DWORD, wintypes.HANDLE,
+        ]
+        create_file.restype = wintypes.HANDLE
+        handle = create_file(
+            str(source), generic_read, file_share_delete, None,
+            open_existing, file_attribute_normal, None,
+        )
+        assert handle not in (0, -1), "CreateFileW failed to acquire the probe lock"
+        try:
+            with warnings.catch_warnings(record=True) as caught:
+                warnings.simplefilter("always")
+                hook.replace_with_retry_verified(source, target)
+            skipped = [
+                w for w in caught
+                if issubclass(w.category, hook.ReplaceVerificationSkipped)
+            ]
+        finally:
+            ctypes.windll.kernel32.CloseHandle(handle)
+        assert target.read_bytes() == b"after\n"
+        assert skipped, "no ReplaceVerificationSkipped warning was emitted"
+
+    @WINDOWS_ONLY
+    def test_an_uncontended_replace_emits_no_verification_skipped_warning(
+        self, tmp_path: Path,
+    ) -> None:
+        """Negative control for the test above: without it, a copy that always warns
+        regardless of contention would pass the positive test for the wrong reason."""
+        import warnings
+
+        source, target = self._pair(tmp_path)
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always")
+            hook.replace_with_retry_verified(source, target)
+        skipped = [
+            w for w in caught
+            if issubclass(w.category, hook.ReplaceVerificationSkipped)
+        ]
+        assert not skipped, "an ordinary uncontended replace must not warn"
+
+    @WINDOWS_ONLY
+    def test_record_approval_survives_a_concurrent_reader_of_its_own_receipt(
+        self, tmp_path: Path,
+    ) -> None:
+        """The production call path, not the helper in isolation."""
+        old = os.environ.get("INTERLOCK_GUARD_STATE_DIR")
+        os.environ["INTERLOCK_GUARD_STATE_DIR"] = str(tmp_path / "state")
+        try:
+            sha = "C" * 64
+            receipt = hook.record_approval(
+                sha, reason="r", alternatives="a", baseline_plan="b", expires_minutes=5,
+            )
+            thread = self._held(receipt, 0.20)
+            try:
+                hook.record_approval(
+                    sha, reason="r2", alternatives="a2", baseline_plan="b2", expires_minutes=5,
+                )
+            finally:
+                thread.join(timeout=10.0)
+            assert json.loads(receipt.read_text(encoding="utf-8"))["reason"] == "r2"
+        finally:
+            if old is None:
+                os.environ.pop("INTERLOCK_GUARD_STATE_DIR", None)
+            else:
+                os.environ["INTERLOCK_GUARD_STATE_DIR"] = old
+
+
+class TestExclusiveCreateClaimPrimitive:
+    """`ENG-00734` design, layer 1 -- see the identical class in
+    ``engineering/tests/test_command_cost_guard_hook.py`` for the full rationale. Kept here
+    too because this package ships and tests itself independently: `consume_approval`'s
+    claim is `os.open(path, O_CREAT|O_EXCL|O_WRONLY)`, and these are the measured shapes it
+    must survive on this platform (`eng00734_probe.py` M3/M4) -- especially the one that
+    decides which `except` clause is correct: an existing DIRECTORY at the claim path is
+    `PermissionError` errno 13, NOT `FileExistsError`, which is why the implementation
+    catches `OSError`.
+    """
+
+    @staticmethod
+    def _claim(path: Path):
+        return os.open(str(path), os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+
+    def test_a_second_claim_in_the_same_process_is_refused_deterministically(self, tmp_path: Path) -> None:
+        claim = tmp_path / "claim.json"
+        os.close(self._claim(claim))
+        with pytest.raises(FileExistsError) as caught:
+            self._claim(claim)
+        assert caught.value.errno == 17
+
+    def test_a_claim_against_a_file_held_open_by_another_reader_also_refuses(self, tmp_path: Path) -> None:
+        claim = tmp_path / "claim.json"
+        os.close(self._claim(claim))
+        thread = _hold_open(claim, 0.3)
+        try:
+            with pytest.raises(FileExistsError) as caught:
+                self._claim(claim)
+            assert caught.value.errno == 17
+        finally:
+            thread.join(timeout=10.0)
+
+    def test_a_claim_against_an_existing_directory_is_permission_error_not_file_exists_error(
+        self, tmp_path: Path,
+    ) -> None:
+        """The load-bearing shape (design section 4.1): this is why `consume_approval`
+        catches `OSError`, not `FileExistsError` -- a narrower catch would let this escape."""
+        claim_dir = tmp_path / "claim.json"
+        claim_dir.mkdir()
+        with pytest.raises(PermissionError) as caught:
+            self._claim(claim_dir)
+        assert caught.value.errno == 13
+        assert not isinstance(caught.value, FileExistsError)
+
+    def test_replace_onto_an_existing_file_succeeds_which_is_why_rename_cannot_be_the_claim(
+        self, tmp_path: Path,
+    ) -> None:
+        source = tmp_path / "source.tmp"
+        source.write_bytes(b"after\n")
+        target = tmp_path / "target.json"
+        target.write_bytes(b"before\n")
+        os.replace(source, target)  # succeeds outright -- no exception, no exclusivity
+        assert target.read_bytes() == b"after\n"
+
+
+class TestConcurrentSourceReplaceCanStillSucceedTwice:
+    """`ENG-00734` design, layer 2 -- see the identical class in
+    ``engineering/tests/test_command_cost_guard_hook.py`` for the full rationale. Drives
+    TODAY's `os.replace` primitive directly -- `consume_approval` no longer calls it for the
+    claim, only for a best-effort cleanup unlink -- and asserts BOTH racers can succeed, so
+    the defect this redesign answers stays in the suite as a measured fact rather than as
+    prose (`ENV-TWO-CONCURRENT-OS-REPLACE-CALLS-ONTO-ONE-TARGET-CAN-BOTH-SUCCEED-ON-
+    WINDOWS`; M1: 15 of 20 real-process trials).
+
+    Allowed to be concurrent precisely because it asserts the UNSAFE behaviour: a race that
+    fails to land makes this fail loudly rather than pass falsely. If every trial refuses,
+    the platform's `os.replace` semantics changed and this design's premise needs
+    re-reading -- a hard failure here, not a skip, is meant to surface that.
+    """
+
+    _CHILD = (
+        "import os, sys, time\n"
+        "root, racer = sys.argv[1], sys.argv[2]\n"
+        "open(os.path.join(root, 'ready.' + racer), 'w').close()\n"
+        "go = os.path.join(root, 'go')\n"
+        "deadline = time.time() + 30.0\n"
+        "while not os.path.exists(go):\n"
+        "    if time.time() > deadline:\n"
+        "        print('TIMEOUT')\n"
+        "        sys.exit(1)\n"
+        "try:\n"
+        "    os.replace(os.path.join(root, 'source.json'), os.path.join(root, 'target.json'))\n"
+        "    print('WIN')\n"
+        "except OSError as error:\n"
+        "    print('LOSE', type(error).__name__)\n"
+    )
+
+    def _race(self, root: Path, racers: int = 2) -> int:
+        """One trial: real processes, released by a filesystem barrier. Returns how many
+        observed their own `os.replace` succeed."""
+        (root / "source.json").write_text('{"uses_remaining": 1}\n', encoding="utf-8")
+        (root / "target.json").write_text("{}\n", encoding="utf-8")
+        ids = [f"r{index}" for index in range(racers)]
+        procs = [
+            subprocess.Popen(
+                [sys.executable, "-c", self._CHILD, str(root), racer],
+                stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+            )
+            for racer in ids
+        ]
+        deadline = time.time() + 15.0
+        while time.time() < deadline:
+            if all((root / f"ready.{racer}").exists() for racer in ids):
+                break
+        else:
+            raise RuntimeError("racers never all reported ready")
+        (root / "go").write_text("go", encoding="utf-8")
+        winners = 0
+        for proc in procs:
+            out, err = proc.communicate(timeout=30)
+            assert proc.returncode == 0, err
+            if out.startswith("WIN"):
+                winners += 1
+        return winners
+
+    def test_two_real_processes_can_both_report_success_replacing_one_source(
+        self, tmp_path: Path,
+    ) -> None:
+        trials = 10
+        winner_counts = []
+        for trial in range(trials):
+            root = tmp_path / f"trial{trial}"
+            root.mkdir()
+            winner_counts.append(self._race(root))
+        assert 2 in winner_counts, (
+            f"expected at least one of {trials} trials to show both racers win "
+            f"(measured M1: 15/20); observed {winner_counts} -- either this platform's "
+            "os.replace semantics changed, or something masked the race"
+        )
