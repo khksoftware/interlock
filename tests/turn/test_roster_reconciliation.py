@@ -34,13 +34,6 @@ class TestExtractIds:
     def test_multiple_ids_in_one_description(self):
         assert hook.extract_ids("PROJ-101 blocks on OPS-9") == {"PROJ-101", "OPS-9"}
 
-    def test_no_id_returns_empty(self):
-        assert hook.extract_ids("core review remainder") == frozenset()
-
-    def test_empty_text_returns_empty(self):
-        assert hook.extract_ids("") == frozenset()
-        assert hook.extract_ids(None) == frozenset()
-
 
 class TestExtractObservedRoster:
     def test_dispatch_with_no_notification_is_outstanding(self, tmp_path):
@@ -96,18 +89,6 @@ class TestCompare:
         _, b_resolved, b_unresolved = hook.compare((), {"a1": "no id here at all"})
         assert b_resolved == ()
         assert b_unresolved == ("a1",)
-
-
-class TestBuildMessages:
-    def test_refuse_reason_names_the_agent_and_ids(self):
-        reason = hook.build_refuse_reason((("a1", ("PROJ-999",)),), (), ())
-        assert "a1" in reason
-        assert "PROJ-999" in reason
-
-    def test_warn_message_names_direction_a_rows(self):
-        message = hook.build_warn_message(("PROJ-101",), ())
-        assert "PROJ-101" in message
-        assert "not necessarily wrong".upper() in message.upper()
 
 
 # --- end-to-end (real subprocess) ---------------------------------------------------

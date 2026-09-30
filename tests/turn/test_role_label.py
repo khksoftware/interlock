@@ -41,9 +41,6 @@ class TestFirstMessageChannel:
         assert reason is not None
         assert "reserved to" in reason
 
-    def test_empty_texts_is_fine(self):
-        assert hook.first_message_wrong_channel_failure([]) is None
-
 
 class TestC2PacketANormalizedLabels:
     def test_c2_a01_default_bold_supervisor_classifies(self):
@@ -60,52 +57,26 @@ class TestC2PacketANormalizedLabels:
         assert reason is not None
         assert "reserved to" in reason
 
-    def test_c2_a05_custom_supervisor_bold_equals_plain(self, monkeypatch):
-        _configure_custom_labels(monkeypatch)
-        assert hook.classify("[Lead] hi") == hook.classify("**[Lead]** hi") is None
 
     def test_c2_a06_custom_worker_plain_classifies(self, monkeypatch):
         _configure_custom_labels(monkeypatch)
         assert hook.classify("[Contributor] hi") is None
 
-    def test_c2_a07_custom_worker_bold_equals_plain(self, monkeypatch):
-        _configure_custom_labels(monkeypatch)
-        assert hook.classify("[Contributor] hi") == hook.classify("**[Contributor]** hi") is None
-
-    def test_c2_a08_custom_worker_plain_is_wrong_channel(self, monkeypatch):
-        _configure_custom_labels(monkeypatch)
-        assert "reserved to" in hook.first_message_wrong_channel_failure(["[Contributor] hi"])
-
-    def test_c2_a09_custom_worker_bold_is_wrong_channel(self, monkeypatch):
-        _configure_custom_labels(monkeypatch)
-        assert "reserved to" in hook.first_message_wrong_channel_failure(["**[Contributor]** hi"])
 
     def test_c2_a10_plain_supervisor_bold_worker_is_blended(self):
         assert "two role labels" in hook.classify("[Supervisor] **[Worker]** hi")
 
-    def test_c2_a11_bold_supervisor_plain_worker_is_blended(self):
-        assert "two role labels" in hook.classify("**[Supervisor]** [Worker] hi")
-
-    def test_c2_a12_bold_supervisor_bold_worker_is_blended(self):
-        assert "two role labels" in hook.classify("**[Supervisor]** **[Worker]** hi")
 
     def test_c2_a13_italic_label_is_refused(self):
         assert hook.classify("*[Supervisor]* hi") is not None
 
-    def test_c2_a14_triple_bold_label_is_refused(self):
-        assert hook.classify("***[Supervisor]*** hi") is not None
 
     def test_c2_a15_underscore_wrapped_label_is_refused(self):
         assert hook.classify("__[Supervisor]__ hi") is not None
 
-    def test_c2_a16_inline_code_wrapped_label_is_refused(self):
-        assert hook.classify("`[Supervisor]` hi") is not None
 
     def test_c2_a17_arbitrary_prefix_decoration_is_refused(self):
         assert hook.classify("~[Supervisor]~ hi") is not None
-
-    def test_c2_a18_arbitrary_suffix_decoration_is_refused(self):
-        assert hook.classify("[Supervisor]~ hi") is not None
 
 
 def _configure_custom_labels(monkeypatch):

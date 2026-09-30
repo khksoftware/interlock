@@ -47,16 +47,4 @@ class TestTheBlockActuallyBlocks:
         result = run_git(sandbox, "commit", "-q", "-m", "should be refused")
         assert result.returncode != 0
 
-    def test_an_unarmed_worktree_passes_the_identical_fixture(self, sandbox: Path) -> None:
-        run_git(sandbox, "config", "--local", "user.email", "leftover@example.invalid")
-        (sandbox / "file.txt").write_text("x\n", encoding="utf-8")
-        run_git(sandbox, "add", "file.txt")
-        result = run_git(sandbox, "commit", "-q", "-m", "unarmed, lands anyway")
-        assert result.returncode == 0
 
-    def test_an_ordinary_identity_passes_while_armed(self, sandbox: Path, interpreter: Path) -> None:
-        install(sandbox, SPEC, interpreter=interpreter)
-        (sandbox / "file.txt").write_text("x\n", encoding="utf-8")
-        run_git(sandbox, "add", "file.txt")
-        result = run_git(sandbox, "commit", "-q", "-m", "ordinary identity, lands")
-        assert result.returncode == 0

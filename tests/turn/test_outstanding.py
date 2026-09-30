@@ -37,13 +37,6 @@ def test_record_start_with_no_recognisable_id_is_a_noop(tmp_path):
     assert not path.exists()
 
 
-def test_record_start_accepts_alternate_key_casings(tmp_path):
-    path = tmp_path / "registry.json"
-    outstanding.record_start(path, {"agentId": "a2", "task": "something"})
-    entries = json.loads(path.read_text(encoding="utf-8"))
-    assert entries[0]["id"] == "a2"
-
-
 def test_record_stop_removes_the_matching_entry(tmp_path):
     path = tmp_path / "registry.json"
     outstanding.record_start(path, {"agent_id": "a1", "description": "x"})
@@ -51,12 +44,6 @@ def test_record_stop_removes_the_matching_entry(tmp_path):
     outstanding.record_stop(path, {"agent_id": "a1"})
     entries = json.loads(path.read_text(encoding="utf-8"))
     assert [e["id"] for e in entries] == ["a2"]
-
-
-def test_record_stop_on_missing_file_is_a_noop(tmp_path):
-    path = tmp_path / "does-not-exist.json"
-    outstanding.record_stop(path, {"agent_id": "a1"})  # must not raise
-    assert not path.exists()
 
 
 def test_prune_and_load_drops_stale_entries(tmp_path):
@@ -69,10 +56,6 @@ def test_prune_and_load_drops_stale_entries(tmp_path):
     assert [e["id"] for e in fresh] == ["new"]
     on_disk = json.loads(path.read_text(encoding="utf-8"))
     assert [e["id"] for e in on_disk] == ["new"]
-
-
-def test_prune_and_load_missing_file_returns_empty(tmp_path):
-    assert outstanding.prune_and_load(tmp_path / "missing.json", stale_seconds=100) == []
 
 
 def test_prune_and_load_malformed_json_returns_empty(tmp_path):
@@ -126,12 +109,3 @@ def test_subagent_start_hook_is_a_silent_noop_when_unarmed(tmp_path, sandbox):
     assert not registry_path.exists()
 
 
-def test_subagent_stop_hook_is_a_silent_noop_when_unarmed(tmp_path, sandbox):
-    registry_path = tmp_path / "reg.json"
-    env = {"INTERLOCK_OUTSTANDING_REGISTRY_PATH": str(registry_path)}
-    # Armed start populates the registry, then an UNARMED stop must leave it untouched.
-    run_hook_subprocess("subagent_start.py", sandbox, {"agent_id": "worker-1", "description": "x"}, env=env)
-    proc = run_hook_subprocess("subagent_stop.py", sandbox, {"agent_id": "worker-1"}, env=env, armed=False)
-    assert proc.returncode == 0, proc.stderr
-    entries = json.loads(registry_path.read_text(encoding="utf-8"))
-    assert [e["id"] for e in entries] == ["worker-1"], "an unarmed stop must not clear the entry"

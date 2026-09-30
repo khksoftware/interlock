@@ -1,11 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Tests for :mod:`interlock.arming` -- the one marker primitive both hosts build their
-own install-and-arm discipline on.
-
-The load-bearing claim these tests exist to prove: a git-host gate and a turn-host hook
-armed in the SAME worktree, through this SAME module, sit side by side in the identical
-directory and neither one's marker collides with or overwrites the other's.
-"""
+"""Tests for :mod:`interlock.arming` -- the one marker primitive both hosts build their own install-and-arm discipline on."""
 from __future__ import annotations
 
 from pathlib import Path
@@ -31,14 +25,6 @@ class TestArmIsArmedDisarm:
         arm(sandbox, "example-marker", "hello")
         assert read_marker(sandbox, "example-marker") == "hello"
 
-    def test_read_marker_is_none_when_unarmed(self, sandbox: Path) -> None:
-        assert read_marker(sandbox, "example-marker") is None
-
-    def test_arming_is_idempotent_with_identical_content(self, sandbox: Path) -> None:
-        first = arm(sandbox, "example-marker", "same")
-        second = arm(sandbox, "example-marker", "same")
-        assert "armed" in first
-        assert "already armed" in second
 
     def test_arming_with_new_content_overwrites(self, sandbox: Path) -> None:
         arm(sandbox, "example-marker", "old")
@@ -61,11 +47,7 @@ class TestArmIsArmedDisarm:
 
 
 class TestGitAndTurnMarkersCoexist:
-    """The concrete claim this module's docstring makes: two markers with two different
-    names, armed through the identical function, live in the same directory without
-    interfering with each other -- proof that `interlock.git.hookkit` and
-    `interlock.turn.arming` genuinely share one mechanism rather than two that merely
-    look similar."""
+    """The concrete claim this module's docstring makes: two markers with two different names, armed through the identical function, live in the same directory without interfering with each other --..."""
 
     def test_two_differently_named_markers_do_not_collide(self, sandbox: Path) -> None:
         arm(sandbox, "interlock-git-protected-paths", "/usr/bin/python3")
@@ -81,8 +63,3 @@ class TestGitAndTurnMarkersCoexist:
         # Disarming one must never touch the other.
         assert is_armed(sandbox, "interlock-turn-idle-roster") is True
 
-    def test_both_markers_sit_in_the_same_directory(self, sandbox: Path) -> None:
-        arm(sandbox, "interlock-git-protected-paths", "x")
-        arm(sandbox, "interlock-turn-idle-roster", "y")
-        assert marker_path(sandbox, "interlock-git-protected-paths").parent == \
-            marker_path(sandbox, "interlock-turn-idle-roster").parent

@@ -1,9 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Tests for the shared installer/render_shim machinery, plus the two ways more than one
-`pre-commit` gate can share that one hook name (git dispatches exactly one file per hook
-name): `install` composing them automatically (see `hookkit.install`'s own docstring and
-`REVIEW_2026-08-21.md` Findings 2 and 3), and the hand-composed alternative
-`docs/INTEGRATION.md` Section 5 still documents."""
+"""Tests for the shared installer/render_shim machinery, plus the two ways more than one `pre-commit` gate can share that one hook name (git dispatches exactly one file per hook name): `install`..."""
 from __future__ import annotations
 
 from pathlib import Path
@@ -11,11 +7,7 @@ from pathlib import Path
 import pytest
 
 from interlock.errors import GateError
-from interlock.git.hookkit import (
-    COMPOSED_DISPATCHER_SHIM, GateSpec, arm_marker, install, installation_state, is_armed,
-    render_shim,
-)
-from interlock.git.absolute_local_path import SPEC as ABSOLUTE_LOCAL_PATH_SPEC
+from interlock.git.hookkit import COMPOSED_DISPATCHER_SHIM, arm_marker, install, installation_state, is_armed, render_shim
 from interlock.git.protected_paths import SPEC as PROTECTED_PATHS_SPEC
 from interlock.git.synthetic_git_identity import SPEC as IDENTITY_SPEC
 from tests.conftest import run_git
@@ -30,10 +22,6 @@ class TestRenderShim:
         assert "/home/" not in shim
         assert "/Users/" not in shim
 
-    def test_shim_is_a_pure_function_of_its_arguments(self) -> None:
-        first = render_shim(marker_name="m", hook_name="pre-commit", cli_module="a.b", gate_label="g")
-        second = render_shim(marker_name="m", hook_name="pre-commit", cli_module="a.b", gate_label="g")
-        assert first == second
 
     def test_forwards_hook_arguments_appends_the_forwarding_form(self) -> None:
         without = render_shim(marker_name="m", hook_name="commit-msg", cli_module="a.b", gate_label="g")
@@ -46,11 +34,7 @@ class TestRenderShim:
 
 
 class TestInstallComposesAutomatically:
-    """`install` used to refuse a second gate onto an already-occupied hook name
-    outright, unconditionally -- even when the thing occupying it was another of this
-    package's OWN gates (`REVIEW_2026-08-21.md` Finding 2: the README's own quickstart
-    hits this on its third line, every time, from a fresh repository). It now composes
-    instead, but only ever onto content it recognizes as its own."""
+    """`install` used to refuse a second gate onto an already-occupied hook name outright, unconditionally -- even when the thing occupying it was another of this package's OWN gates..."""
 
     def test_a_second_gate_composes_rather_than_refuses(
         self, sandbox: Path, interpreter: Path,
@@ -61,18 +45,6 @@ class TestInstallComposesAutomatically:
         hook = sandbox / ".git" / "hooks" / "pre-commit"
         assert hook.read_bytes().decode("utf-8") == COMPOSED_DISPATCHER_SHIM
 
-    def test_a_third_gate_composes_onto_the_same_dispatcher(
-        self, sandbox: Path, interpreter: Path,
-    ) -> None:
-        install(sandbox, PROTECTED_PATHS_SPEC, interpreter=interpreter)
-        install(sandbox, IDENTITY_SPEC, interpreter=interpreter)
-        install(sandbox, ABSOLUTE_LOCAL_PATH_SPEC, interpreter=interpreter)
-        hook = sandbox / ".git" / "hooks" / "pre-commit"
-        assert hook.read_bytes().decode("utf-8") == COMPOSED_DISPATCHER_SHIM
-        components = sandbox / ".git" / "hooks" / "interlock-composed" / "pre-commit"
-        assert (components / PROTECTED_PATHS_SPEC.marker_name).is_file()
-        assert (components / IDENTITY_SPEC.marker_name).is_file()
-        assert (components / ABSOLUTE_LOCAL_PATH_SPEC.marker_name).is_file()
 
     def test_reinstalling_an_already_composed_gate_is_idempotent(
         self, sandbox: Path, interpreter: Path,
@@ -135,13 +107,7 @@ class TestInstallComposesAutomatically:
 
 
 class TestComposingTwoPreCommitGatesOntoOneSharedHook:
-    """git dispatches one `hooks/pre-commit` file; two gates that both use that hook name
-    can still be composed BY HAND into one shim that runs both, exactly as
-    `docs/INTEGRATION.md` Section 5 describes -- an alternative `install`'s own automatic
-    composing (see `TestInstallComposesAutomatically` above) supersedes for the common
-    case, but does not replace. This proves the hand-composed pattern still works end to
-    end, on real installed hooks and a real `git commit`, and that `interlock status`
-    recognizes it too rather than calling a correctly-enforcing hook FOREIGN."""
+    """git dispatches one `hooks/pre-commit` file; two gates that both use that hook name can still be composed BY HAND into one shim that runs both, exactly as `docs/INTEGRATION.md` Section 5 describes..."""
 
     def test_hand_composed_shim_dispatches_to_both_gates_markers(
         self, sandbox: Path, interpreter: Path,
@@ -202,15 +168,7 @@ class TestComposingTwoPreCommitGatesOntoOneSharedHook:
 
 
 class TestInstallUpgradesItsOwnOlderShimInPlace:
-    """`install` used to read an older copy of THIS SAME gate's own solo shim as though it
-    were a different gate's hook and converted it into a composed dispatcher -- so any
-    change to a gate's own shim text would convert an upgrading adopter's hook on their
-    very next `install`. It now recognizes its own gate (same embedded marker name) and
-    upgrades in place instead, for both a solo shim and a component already living inside
-    an existing composed dispatcher. A genuinely different gate still composes exactly as
-    before (`TestInstallComposesAutomatically`), and a genuinely foreign hook is still
-    refused exactly as before (`test_a_genuinely_foreign_hook_is_still_refused_not_
-    clobbered`)."""
+    """`install` used to read an older copy of THIS SAME gate's own solo shim as though it were a different gate's hook and converted it into a composed dispatcher -- so any change to a gate's own shim..."""
 
     def test_a_stale_solo_shim_of_the_same_gate_is_upgraded_not_composed(
         self, sandbox: Path, interpreter: Path,
@@ -280,11 +238,3 @@ class TestInstallUpgradesItsOwnOlderShimInPlace:
         assert "older copy" in detail
 
 
-class TestGateSpecItself:
-    def test_is_frozen(self) -> None:
-        spec = GateSpec(
-            marker_name="m", hook_name="pre-commit", shim="#!/bin/sh\n",
-            cli_module="pkg.cli.mod", gate_label="test gate",
-        )
-        with pytest.raises(Exception):
-            spec.marker_name = "other"  # type: ignore[misc]

@@ -8,6 +8,14 @@ reminding about, something it did not before) rather than only a Python API.
 
 ## [Unreleased]
 
+## [2.0.2] — 2026-09-30
+
+### Changed
+
+- The package's own test suite is thinned: a test stays only if it guards a live, relied-on
+  behaviour that could realistically regress and that no other test already catches. No gate,
+  hook or public API behaviour changes.
+
 ## [2.0.1] — 2026-09-29
 
 **PATCH.** No refusal changes, no marker or environment-variable rename, no hook

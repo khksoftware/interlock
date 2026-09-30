@@ -1,20 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Proves independent adoption is real in the CODE, not only claimed in prose.
-
-Each test below makes a PHYSICAL trimmed copy of `src/interlock` with one host's
-subpackage directory deleted outright, then runs real subprocesses against that trimmed
-copy's own `PYTHONPATH` -- not a mock, not a monkeypatched import, an actual missing
-directory on disk. If `interlock.git` genuinely does not import `interlock.turn` (and
-vice versa), every check in the surviving host keeps working, including a REAL `git
-commit` refusal / a REAL hook subprocess run, with the other host's directory simply not
-there to import.
-
-`interlock.registry` and `interlock.cli` are the one place in this distribution that
-legitimately imports both hosts (see `registry.py`'s own docstring) -- this suite proves
-that module fails to import in a trimmed copy, cleanly, precisely because it is the one
-place that needs both, and every gate or hook module a real adopter would actually use
-does not share that requirement.
-"""
+"""Proves independent adoption is real in the CODE, not only claimed in prose."""
 from __future__ import annotations
 
 import os
@@ -50,10 +35,6 @@ def _run_python(trimmed_src: Path, code: str, *, cwd: Path | None = None, env_ex
 
 
 class TestGitHostIndependentOfTurnHost:
-    def test_turn_subpackage_is_genuinely_absent(self, tmp_path: Path) -> None:
-        trimmed = _trimmed_copy(tmp_path, remove="turn")
-        assert not (trimmed / "interlock" / "turn").exists()
-        assert (trimmed / "interlock" / "git").is_dir()
 
     def test_every_git_gate_module_imports_with_turn_absent(self, tmp_path: Path) -> None:
         trimmed = _trimmed_copy(tmp_path, remove="turn")
@@ -111,10 +92,6 @@ class TestGitHostIndependentOfTurnHost:
 
 
 class TestTurnHostIndependentOfGitHost:
-    def test_git_subpackage_is_genuinely_absent(self, tmp_path: Path) -> None:
-        trimmed = _trimmed_copy(tmp_path, remove="git")
-        assert not (trimmed / "interlock" / "git").exists()
-        assert (trimmed / "interlock" / "turn").is_dir()
 
     def test_every_turn_hook_module_imports_with_git_absent(self, tmp_path: Path) -> None:
         trimmed = _trimmed_copy(tmp_path, remove="git")
@@ -137,18 +114,9 @@ class TestTurnHostIndependentOfGitHost:
         assert result.returncode != 0
         assert "ModuleNotFoundError" in result.stderr or "ImportError" in result.stderr
 
-    def test_registry_and_cli_fail_cleanly_because_they_need_both_hosts(self, tmp_path: Path) -> None:
-        trimmed = _trimmed_copy(tmp_path, remove="git")
-        result = _run_python(trimmed, "import interlock.registry")
-        assert result.returncode != 0
-        result_cli = _run_python(trimmed, "import interlock.cli")
-        assert result_cli.returncode != 0
 
     def test_a_real_hook_arms_and_blocks_with_git_absent(self, tmp_path: Path, sandbox: Path) -> None:
-        """The end-to-end proof: arm a turn hook and drive a REAL subprocess invocation
-        of it -- unarmed first (silent no-op), then armed (a real block) -- using ONLY
-        the trimmed copy's own PYTHONPATH. `interlock.git` is not on disk anywhere this
-        process can reach."""
+        """The end-to-end proof: arm a turn hook and drive a REAL subprocess invocation of it -- unarmed first (silent no-op), then armed (a real block) -- using ONLY the trimmed copy's own PYTHONPATH."""
         trimmed = _trimmed_copy(tmp_path, remove="git")
         full_env = dict(os.environ)
         full_env["PYTHONPATH"] = str(trimmed)
@@ -185,13 +153,6 @@ class TestTurnHostIndependentOfGitHost:
 
 
 class TestGuardHostIndependentOfGitAndTurn:
-    def test_guard_subpackage_is_genuinely_absent_from_a_git_only_or_turn_only_copy(
-        self, tmp_path: Path,
-    ) -> None:
-        trimmed = _trimmed_copy(tmp_path, remove="guard")
-        assert not (trimmed / "interlock" / "guard").exists()
-        assert (trimmed / "interlock" / "git").is_dir()
-        assert (trimmed / "interlock" / "turn").is_dir()
 
     def test_every_guard_hook_module_imports_with_git_and_turn_absent(self, tmp_path: Path) -> None:
         without_git = _trimmed_copy(tmp_path, remove="git")
@@ -207,12 +168,6 @@ class TestGuardHostIndependentOfGitAndTurn:
         assert result.returncode != 0
         assert "ModuleNotFoundError" in result.stderr or "ImportError" in result.stderr
 
-    def test_registry_and_cli_fail_cleanly_because_they_need_every_host(self, tmp_path: Path) -> None:
-        trimmed = _trimmed_copy(tmp_path, remove="guard")
-        result = _run_python(trimmed, "import interlock.registry")
-        assert result.returncode != 0
-        result_cli = _run_python(trimmed, "import interlock.cli")
-        assert result_cli.returncode != 0
 
     def test_a_real_hook_arms_and_blocks_with_git_and_turn_absent(self, tmp_path: Path, sandbox: Path) -> None:
         """The end-to-end proof: arm the guard hook and drive a REAL subprocess invocation

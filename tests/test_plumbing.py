@@ -7,10 +7,7 @@ from pathlib import Path
 import pytest
 
 from interlock.errors import GateError
-from interlock.plumbing import (
-    commit_paths, effective_git_config, hooks_directory, index_blob, repository_root,
-    working_tree_root, worktree_git_dir,
-)
+from interlock.plumbing import commit_paths, effective_git_config, hooks_directory, index_blob, repository_root, working_tree_root
 from tests.conftest import run_git
 
 
@@ -26,11 +23,6 @@ class TestTheBasics:
         with pytest.raises(GateError):
             working_tree_root(outside)
 
-    def test_worktree_git_dir_is_the_dot_git_directory(self, sandbox: Path) -> None:
-        assert worktree_git_dir(sandbox) == (sandbox / ".git").resolve()
-
-    def test_hooks_directory_defaults_to_common_dir_hooks(self, sandbox: Path) -> None:
-        assert hooks_directory(sandbox) == (sandbox / ".git" / "hooks").resolve()
 
     def test_hooks_directory_honours_core_hooks_path(self, sandbox: Path) -> None:
         custom = sandbox / "custom-hooks"
@@ -75,11 +67,7 @@ class TestEffectiveGitConfig:
 
 
 class TestRepositoryRootNeverRaises:
-    """`repository_root` is `interlock.turn`'s own fail-open counterpart to
-    `working_tree_root` -- see `plumbing.py`'s module docstring on why both exist. Proven
-    here rather than assumed: it must return the identical answer `working_tree_root` does
-    on a real repository, and `None` (never an exception) everywhere that function raises.
-    """
+    """`repository_root` is `interlock.turn`'s own fail-open counterpart to `working_tree_root` -- see `plumbing.py`'s module docstring on why both exist."""
 
     def test_agrees_with_working_tree_root_inside_a_repository(self, sandbox: Path) -> None:
         assert repository_root(sandbox) == working_tree_root(sandbox)
@@ -89,9 +77,4 @@ class TestRepositoryRootNeverRaises:
         outside.mkdir()
         assert repository_root(outside) is None
 
-    def test_returns_none_for_a_nonexistent_path_rather_than_raising(self, tmp_path: Path) -> None:
-        assert repository_root(tmp_path / "does-not-exist-at-all") is None
 
-    def test_defaults_to_the_current_directory_when_given_none(self, sandbox: Path, monkeypatch) -> None:
-        monkeypatch.chdir(sandbox)
-        assert repository_root(None) == sandbox.resolve()

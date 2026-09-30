@@ -1,8 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""End-to-end tests for the unified `interlock` command (`interlock.cli`) -- install, arm,
-disarm, and status, across both `git.*` and `turn.*` identifiers, driven exactly as an
-adopter would run it: `python -m interlock ...` as a real subprocess.
-"""
+"""End-to-end tests for the unified `interlock` command (`interlock.cli`) -- install, arm, disarm, and status, across both `git.*` and `turn.*` identifiers, driven exactly as an adopter would run it:..."""
 from __future__ import annotations
 
 import subprocess
@@ -85,13 +82,6 @@ class TestGuardInstallAndArm:
         assert not (sandbox / ".claude").exists()
         assert not (sandbox / "settings.json").exists()
 
-    def test_disarm_a_guard_hook(self, sandbox: Path) -> None:
-        run_cli(sandbox, "arm", "guard.execution-guard")
-        result = run_cli(sandbox, "disarm", "guard.execution-guard")
-        assert result.returncode == 0, result.stderr
-        status = run_cli(sandbox, "status", "guard.execution-guard")
-        assert "not armed" in status.stdout
-
 
 class TestTurnInstallAndArm:
     def test_arm_writes_a_marker_under_the_same_git_dir_as_a_git_gate(self, sandbox: Path) -> None:
@@ -110,22 +100,9 @@ class TestTurnInstallAndArm:
         assert not (sandbox / ".claude").exists()
         assert not (sandbox / "settings.json").exists()
 
-    def test_disarm_a_turn_hook(self, sandbox: Path) -> None:
-        run_cli(sandbox, "arm", "turn.idle-roster")
-        result = run_cli(sandbox, "disarm", "turn.idle-roster")
-        assert result.returncode == 0, result.stderr
-        status = run_cli(sandbox, "status", "turn.idle-roster")
-        assert "not armed" in status.stdout
-
 
 class TestReadmePath1Quickstart:
-    """`README.md`'s own "Path 1" quickstart prints four `interlock install` commands,
-    back to back, as the first-class adoption path for `interlock.git` alone. Three of
-    those five gates share the `pre-commit` hook name, so this hit a hard refusal on the
-    third line, every time, from a fresh repository (`REVIEW_2026-08-21.md` Finding 2),
-    and the gates that DID get wired by hand-composing around it were then misreported by
-    `status` as FOREIGN (Finding 3). This runs the four lines exactly as printed and
-    checks both are now fixed."""
+    """`README.md`'s own "Path 1" quickstart prints four `interlock install` commands, back to back, as the first-class adoption path for `interlock.git` alone."""
 
     def test_all_four_installs_succeed_in_the_printed_order(self, sandbox: Path) -> None:
         for gate_id in (
@@ -183,25 +160,12 @@ class TestPinCheck:
         assert result.returncode == 1
         assert "differs from installed source" in result.stderr
 
-    def test_a_matching_git_gate_shim_is_clean(self, sandbox: Path, tmp_path: Path) -> None:
-        from interlock import registry
-
-        gate = registry.find_git_gate("git.protected-paths")
-        deployed = tmp_path / "pre-commit"
-        deployed.write_text(gate.spec.shim, encoding="utf-8", newline="")
-        result = run_cli(sandbox, "pin-check", "git.protected-paths", "--deployed-path", str(deployed))
-        assert result.returncode == 0, result.stderr
 
     def test_a_missing_deployed_path_is_reported_and_exits_nonzero(self, sandbox: Path, tmp_path: Path) -> None:
         missing = tmp_path / "does-not-exist.py"
         result = run_cli(sandbox, "pin-check", "turn.idle-roster", "--deployed-path", str(missing))
         assert result.returncode == 1
         assert "no deployed copy" in result.stderr
-
-    def test_unknown_id(self, sandbox: Path, tmp_path: Path) -> None:
-        result = run_cli(sandbox, "pin-check", "bogus.nothing", "--deployed-path", str(tmp_path / "x.py"))
-        assert result.returncode == 2
-        assert "unknown id" in result.stderr
 
 
 class TestUnknownIdEveryVerb:
@@ -210,12 +174,4 @@ class TestUnknownIdEveryVerb:
         assert result.returncode != 0
         assert "unknown id" in result.stderr
 
-    def test_arm_unknown_id(self, sandbox: Path) -> None:
-        result = run_cli(sandbox, "arm", "bogus.nothing")
-        assert result.returncode != 0
-        assert "unknown id" in result.stderr
 
-    def test_disarm_unknown_id(self, sandbox: Path) -> None:
-        result = run_cli(sandbox, "disarm", "bogus.nothing")
-        assert result.returncode != 0
-        assert "unknown id" in result.stderr

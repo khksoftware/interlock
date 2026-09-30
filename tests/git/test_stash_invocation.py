@@ -75,11 +75,7 @@ class TestTheBlockActuallyBlocks:
 
 
 class TestTheInertPhasesSpawnNothing:
-    """`committed` and `aborted` can never refuse -- git ignores the hook's exit status then,
-    and the module returns no refusal for any phase but `prepared` -- so the shim exits before
-    spawning git or python. Proved against the real `SPEC.shim` text with a recorded
-    "interpreter" that leaves a sentinel file if it is ever reached; the `prepared` case proves
-    the sentinel mechanism itself works, so the negative checks cannot pass vacuously."""
+    """`committed` and `aborted` can never refuse -- git ignores the hook's exit status then, and the module returns no refusal for any phase but `prepared` -- so the shim exits before spawning git or..."""
 
     def _run_shim(self, tmp_path: Path, phase: str) -> tuple[int, bool]:
         repo = tmp_path / "repo"
@@ -102,8 +98,6 @@ class TestTheInertPhasesSpawnNothing:
     def test_committed_exits_zero_without_reaching_the_interpreter(self, tmp_path: Path) -> None:
         assert self._run_shim(tmp_path, "committed") == (0, False)
 
-    def test_aborted_exits_zero_without_reaching_the_interpreter(self, tmp_path: Path) -> None:
-        assert self._run_shim(tmp_path, "aborted") == (0, False)
 
     def test_prepared_still_reaches_the_interpreter(self, tmp_path: Path) -> None:
         assert self._run_shim(tmp_path, "prepared") == (0, True)

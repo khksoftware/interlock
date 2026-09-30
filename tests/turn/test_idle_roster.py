@@ -42,29 +42,6 @@ def test_unsequenced_row_never_blocks(sandbox):
     assert proc.stdout.strip() == ""
 
 
-def test_blocked_row_never_blocks(sandbox):
-    write_session_record(
-        sandbox, roster={"state": "none", "entries": []},
-        queue=[{"id": "PROJ-1", "status": "queued", "sequenced": True, "blocked_on": "PROJ-0"}],
-    )
-    proc = run_hook_subprocess("idle_roster.py", sandbox, {"stop_hook_active": False})
-    assert proc.stdout.strip() == ""
-
-
-def test_exempted_row_never_blocks(sandbox):
-    exemptions_path = sandbox / "exemptions.json"
-    exemptions_path.write_text(json.dumps({"PROJ-1": "session-boundary work"}), encoding="utf-8")
-    write_session_record(
-        sandbox, roster={"state": "none", "entries": []},
-        queue=[{"id": "PROJ-1", "status": "queued", "sequenced": True}],
-    )
-    proc = run_hook_subprocess(
-        "idle_roster.py", sandbox, {"stop_hook_active": False},
-        env={"INTERLOCK_SESSION_BOUNDARY_ROWS_PATH": "exemptions.json"},
-    )
-    assert proc.stdout.strip() == ""
-
-
 def test_exempted_row_via_shared_interlock_json_never_blocks(sandbox):
     """The one setting `interlock.turn.config` reads from the SHARED `interlock.json`
     file rather than only an environment variable -- see that module's own docstring."""

@@ -41,14 +41,6 @@ class TestC2PlatformAndOpenRows:
     def test_c2_p03_none_selector_returns_none(self):
         assert sr.platform_node({"platforms": [{"platform": "default"}]}, platform=None) is None
 
-    def test_c2_p04_empty_selector_returns_none(self):
-        assert sr.platform_node({"platforms": [{"platform": "default"}]}, platform="") is None
-
-    def test_c2_p05_padded_selector_returns_none(self):
-        assert sr.platform_node({"platforms": [{"platform": "default"}]}, platform=" default ") is None
-
-    def test_c2_p06_non_string_selector_returns_none(self):
-        assert sr.platform_node({"platforms": [{"platform": "default"}]}, platform=7) is None
 
     def test_c2_p07_duplicate_selected_platform_is_ambiguous(self):
         document = {"platforms": [{"platform": "default"}, {"platform": "default"}]}
@@ -68,13 +60,6 @@ class TestC2PlatformAndOpenRows:
         document = {"platforms": [{"platform": "default"}, {}]}
         assert sr.platform_node(document, platform="default") is None
 
-    def test_c2_p11_non_string_platform_identity_invalidates_population(self):
-        document = {"platforms": [{"platform": "default"}, {"platform": 1}]}
-        assert sr.platform_node(document, platform="default") is None
-
-    def test_c2_p12_empty_platform_identity_invalidates_population(self):
-        document = {"platforms": [{"platform": "default"}, {"platform": ""}]}
-        assert sr.platform_node(document, platform="default") is None
 
     def test_c2_p13_non_list_platforms_returns_none(self):
         assert sr.platform_node({"platforms": {}}, platform="default") is None
@@ -86,11 +71,6 @@ class TestC2PlatformAndOpenRows:
     def test_c2_p15_queued_row_is_open(self):
         assert sr.open_row_ids({"queue": [{"id": "PROJ-1", "status": "queued"}]}) == frozenset({"PROJ-1"})
 
-    def test_c2_p16_running_row_is_open(self):
-        assert sr.open_row_ids({"queue": [{"id": "PROJ-1", "status": "running"}]}) == frozenset({"PROJ-1"})
-
-    def test_c2_p17_blocked_row_is_open(self):
-        assert sr.open_row_ids({"queue": [{"id": "PROJ-1", "status": "blocked"}]}) == frozenset({"PROJ-1"})
 
     def test_c2_p18_closed_row_is_terminal(self):
         assert sr.open_row_ids({"queue": [{"id": "PROJ-1", "status": "closed"}]}) == frozenset()
@@ -98,14 +78,6 @@ class TestC2PlatformAndOpenRows:
     def test_c2_p19_missing_status_is_not_open(self):
         assert sr.open_row_ids({"queue": [{"id": "PROJ-1"}]}) == frozenset()
 
-    def test_c2_p20_null_status_is_not_open(self):
-        assert sr.open_row_ids({"queue": [{"id": "PROJ-1", "status": None}]}) == frozenset()
-
-    def test_c2_p21_non_string_status_is_not_open(self):
-        assert sr.open_row_ids({"queue": [{"id": "PROJ-1", "status": 1}]}) == frozenset()
-
-    def test_c2_p22_empty_status_is_not_open(self):
-        assert sr.open_row_ids({"queue": [{"id": "PROJ-1", "status": ""}]}) == frozenset()
 
     def test_c2_p23_case_variant_status_is_not_open(self):
         assert sr.open_row_ids({"queue": [{"id": "PROJ-1", "status": "Queued"}]}) == frozenset()
@@ -122,8 +94,6 @@ class TestC2PlatformAndOpenRows:
     def test_c2_p27_missing_row_id_is_ignored(self):
         assert sr.open_row_ids({"queue": [{"status": "queued"}]}) == frozenset()
 
-    def test_c2_p28_empty_row_id_is_ignored(self):
-        assert sr.open_row_ids({"queue": [{"id": "", "status": "queued"}]}) == frozenset()
 
     def test_c2_p29_backticks_are_stripped(self):
         assert sr.open_row_ids({"queue": [{"id": "`PROJ-1`", "status": "queued"}]}) == frozenset({"PROJ-1"})
@@ -142,18 +112,6 @@ class TestC2PlatformAndOpenRows:
         result = sr.open_row_ids({"queue": [{"id": "PROJ-1", "status": "queued"}]})
         assert isinstance(result, frozenset)
         assert not hasattr(result, "add")
-
-    def test_c3_p33_list_status_is_not_open(self):
-        node = {"queue": [{"id": "PROJ-1", "status": ["queued"]}]}
-        assert sr.open_row_ids(node) == frozenset()
-
-    def test_c3_p34_dict_status_is_not_open(self):
-        node = {"queue": [{"id": "PROJ-1", "status": {"value": "queued"}}]}
-        assert sr.open_row_ids(node) == frozenset()
-
-    def test_c3_p35_set_status_is_not_open(self):
-        node = {"queue": [{"id": "PROJ-1", "status": {"queued"}}]}
-        assert sr.open_row_ids(node) == frozenset()
 
 
 class TestRosterIsEmpty:

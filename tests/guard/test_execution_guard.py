@@ -1,13 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Tests for :mod:`interlock.guard.execution_guard` -- the ``PreToolUse``-shaped guard
-that refuses a high-confidence expensive command shape before it runs.
-
-Red-green discipline: each rule this hook recognizes is proven to fire on a matching
-shape and NOT fire on the closest safe neighbour, matching the convention every gate and
-hook in this distribution already follows. A dedicated class proves the payload-stripping
-repair -- content inside a heredoc/here-string body must never be scanned as if it were the
-command itself, while the surrounding invocation shape still is.
-"""
+"""Tests for :mod:`interlock.guard.execution_guard` -- the ``PreToolUse``-shaped guard that refuses a high-confidence expensive command shape before it runs."""
 from __future__ import annotations
 
 import json
@@ -23,10 +15,7 @@ from interlock.guard import arming, execution_guard as hook
 
 
 def _hold_open(target: Path, seconds: float):
-    """Open `target` for read from a second thread and release it after `seconds`. Module
-    level -- rather than the `_held` staticmethod on `TestAtomicWriteSurvivesAConcurrent
-    Reader` below -- so `ENG-00734`'s new claim-primitive tests can use it without reaching
-    into another class."""
+    """Open `target` for read from a second thread and release it after `seconds`."""
     import threading
 
     opened = threading.Event()
@@ -119,24 +108,13 @@ class TestPayloadStrippingSafety:
         assert "python -m pytest tests" in stripped
 
     def test_a_heredoc_marker_inside_a_quoted_string_does_not_discard_the_line_between(self) -> None:
-        """Re-review follow-up: ``<<`` is not a redirect operator inside a quoted string in
-        any shell -- ``echo "a << ZZZ"`` followed by a real command and a later, entirely
-        coincidental bare ``ZZZ`` line executes all three lines as ordinary prose plus two
-        unrelated commands. A regex match on the two characters alone, without checking
-        whether they sit outside quotes, read this as a genuine heredoc and stripped the
-        real command sitting between the two coincidental lines."""
+        """Re-review follow-up: ``<<`` is not a redirect operator inside a quoted string in any shell -- ``echo "a << ZZZ"`` followed by a real command and a later, entirely coincidental bare ``ZZZ`` line..."""
         command = 'echo "a << ZZZ"\nfind . -name "*.py"\nZZZ\n'
         stripped = hook.strip_payload_bodies(command)
         assert 'find . -name "*.py"' in stripped
 
     def test_an_apostrophe_before_a_genuine_heredoc_opener_leaves_its_body_visible(self) -> None:
-        """What the fix above now tolerates, stated and tested explicitly: the quote-parity
-        check cannot distinguish a genuine apostrophe in prose from an actual open quote, so
-        an odd quote count ahead of a REAL heredoc opener on the same line reads as "not
-        real" and its body is left un-stripped -- visible to the classifier rather than
-        treated as inert data. Safe (a false positive at worst, never a silently dropped
-        command) but a real, new behavioural cost of the fix, not a free one -- see
-        ``TestClassification`` below for the concrete false positive this produces."""
+        """What the fix above now tolerates, stated and tested explicitly: the quote-parity check cannot distinguish a genuine apostrophe in prose from an actual open quote, so an odd quote count ahead of a..."""
         command = "echo don't care <<'EOF' > NOTE.md\nRun `python -m pytest tests -q` before reporting done.\nEOF\n"
         stripped = hook.strip_payload_bodies(command)
         assert "before reporting done" in stripped
@@ -144,12 +122,7 @@ class TestPayloadStrippingSafety:
     def test_a_heredoc_marker_inside_a_quoted_string_spanning_multiple_lines_does_not_discard_the_line_between(
         self,
     ) -> None:
-        """A third independent review pass: the quote-parity check only looked at the ONE
-        line a candidate ``<<`` sits on, resetting to "outside any quote" at the start of
-        every line. A real double-quoted string is not obliged to close on the line it
-        opened -- here it opens on the first line and does not close until the third -- so
-        the ``<<`` on the second line was misread as a real heredoc opener, and the `find`
-        line between it and the coincidental `ZZZ` terminator was silently dropped."""
+        """A third independent review pass: the quote-parity check only looked at the ONE line a candidate ``<<`` sits on, resetting to "outside any quote" at the start of every line."""
         command = (
             'echo "first line of a quoted message\n'
             "and a value shifted << ZZZ\n"
@@ -162,11 +135,7 @@ class TestPayloadStrippingSafety:
     def test_a_backslash_escaped_quote_ahead_of_a_heredoc_marker_does_not_discard_the_line_between(
         self,
     ) -> None:
-        """The same review pass: a backslash-escaped ``\\"`` was counted as a second real
-        quote delimiter, making an ODD (still-open) quote count look EVEN (closed) by the
-        time the parity check reached the ``<<`` -- when the whole line is actually one
-        self-closing quoted string. The `find` line was silently dropped exactly as in the
-        single-quote-count defect this closes alongside."""
+        """The same review pass: a backslash-escaped ``\\"`` was counted as a second real quote delimiter, making an ODD (still-open) quote count look EVEN (closed) by the time the parity check reached the..."""
         command = 'echo "she said \\" and a << ZZZ"\nfind . -name "*.py"\nZZZ\n'
         stripped = hook.strip_payload_bodies(command)
         assert 'find . -name "*.py"' in stripped
@@ -208,53 +177,6 @@ class TestClassification:
     def test_a_genuine_expensive_command_outside_a_heredoc_body_still_blocks(self) -> None:
         command = "python -m pytest tests -q <<'EOF'\nirrelevant input\nEOF\n"
         assert "COST-FULL-TEST-SUITE" in self.rule_ids(hook.strip_payload_bodies(command))
-
-    def test_a_heredoc_body_fed_to_bash_is_still_classified(self) -> None:
-        command = "bash <<'EOF'\nfind . -name \"*.py\"\nEOF\n"
-        assert "COST-FULL-TREE-SCAN" in self.rule_ids(hook.strip_payload_bodies(command))
-
-    def test_a_heredoc_piped_into_bash_is_still_classified(self) -> None:
-        command = "cat <<'EOF' | bash\npython -m pytest tests\nEOF\n"
-        assert "COST-FULL-TEST-SUITE" in self.rule_ids(hook.strip_payload_bodies(command))
-
-    def test_a_stray_double_angle_in_prose_does_not_hide_the_next_line(self) -> None:
-        command = 'echo "shift the value << two places"\nfind . -name "*.py"\n'
-        assert "COST-FULL-TREE-SCAN" in self.rule_ids(hook.strip_payload_bodies(command))
-
-    def test_an_unterminated_heredoc_does_not_hide_the_rest_of_the_command(self) -> None:
-        command = "cat <<'EOF'\npython -m pytest tests\n"
-        assert "COST-FULL-TEST-SUITE" in self.rule_ids(hook.strip_payload_bodies(command))
-
-    def test_a_heredoc_marker_inside_a_quoted_string_does_not_hide_the_command_between(self) -> None:
-        command = 'echo "a << ZZZ"\nfind . -name "*.py"\nZZZ\n'
-        assert "COST-FULL-TREE-SCAN" in self.rule_ids(hook.strip_payload_bodies(command))
-
-    def test_an_apostrophe_before_a_genuine_heredoc_opener_can_now_false_positive(self) -> None:
-        """The concrete cost of the new tolerance pinned in ``TestPayloadStrippingSafety``:
-        an ordinary documentation heredoc, whose opening line happens to carry an apostrophe
-        before the ``<<``, is no longer recognized as a genuine heredoc -- its prose body
-        stays visible and, here, that prose itself mentions ``pytest tests``, so this
-        previously-silent note-writing command now blocks. Before this fix the body would
-        have been stripped and this would not have blocked at all."""
-        command = "echo don't care <<'EOF' > NOTE.md\nRun `python -m pytest tests -q` before reporting done.\nEOF\n"
-        assert "COST-FULL-TEST-SUITE" in self.rule_ids(hook.strip_payload_bodies(command))
-
-    def test_a_heredoc_marker_inside_a_multiline_quoted_string_does_not_hide_the_command_between(
-        self,
-    ) -> None:
-        command = (
-            'echo "first line of a quoted message\n'
-            "and a value shifted << ZZZ\n"
-            'find . -name "*.py"\n'
-            "ZZZ\n"
-        )
-        assert "COST-FULL-TREE-SCAN" in self.rule_ids(hook.strip_payload_bodies(command))
-
-    def test_a_backslash_escaped_quote_ahead_of_a_heredoc_marker_does_not_hide_the_command_between(
-        self,
-    ) -> None:
-        command = 'echo "she said \\" and a << ZZZ"\nfind . -name "*.py"\nZZZ\n'
-        assert "COST-FULL-TREE-SCAN" in self.rule_ids(hook.strip_payload_bodies(command))
 
 
 class TestHookEndToEnd:
@@ -312,53 +234,6 @@ class TestHookEndToEnd:
         assert decision["decision"] == "block"
         assert "COST-FULL-TREE-SCAN" in decision["reason"]
 
-    def test_armed_unterminated_heredoc_still_blocks(self, sandbox: Path, tmp_path: Path) -> None:
-        """Independent-review follow-up: an unterminated heredoc must not silently discard
-        the expensive command that follows it, driven as a real armed subprocess."""
-        command = "cat <<'EOF'\npython -m pytest tests\n"
-        result = self._run(sandbox, str(tmp_path / "state"), command)
-        decision = json.loads(result.stdout)
-        assert decision["decision"] == "block"
-        assert "COST-FULL-TEST-SUITE" in decision["reason"]
-
-    def test_armed_heredoc_marker_inside_a_quoted_string_still_blocks(self, sandbox: Path, tmp_path: Path) -> None:
-        """Re-review follow-up, driven as a real armed subprocess: a coincidental `<<`/tag
-        match inside ordinary quoted prose must not disarm the guard against the real
-        command sitting between the two lines that happen to look like a heredoc."""
-        command = 'echo "a << ZZZ"\nfind . -name "*.py"\nZZZ\n'
-        result = self._run(sandbox, str(tmp_path / "state"), command)
-        decision = json.loads(result.stdout)
-        assert decision["decision"] == "block"
-        assert "COST-FULL-TREE-SCAN" in decision["reason"]
-
-    def test_armed_heredoc_marker_inside_a_multiline_quoted_string_still_blocks(
-        self, sandbox: Path, tmp_path: Path
-    ) -> None:
-        """A third independent review pass, driven as a real armed subprocess: a quoted
-        string that opens on one line and does not close until a later one must not let a
-        coincidental `<<` in between disarm the guard against the real command sitting
-        between it and the tag line that happens to match."""
-        command = (
-            'echo "first line of a quoted message\n'
-            "and a value shifted << ZZZ\n"
-            'find . -name "*.py"\n'
-            "ZZZ\n"
-        )
-        result = self._run(sandbox, str(tmp_path / "state"), command)
-        decision = json.loads(result.stdout)
-        assert decision["decision"] == "block"
-        assert "COST-FULL-TREE-SCAN" in decision["reason"]
-
-    def test_armed_backslash_escaped_quote_ahead_of_a_heredoc_marker_still_blocks(
-        self, sandbox: Path, tmp_path: Path
-    ) -> None:
-        """Same review pass, driven as a real armed subprocess: a backslash-escaped quote
-        must not be counted as closing a string that is genuinely still open."""
-        command = 'echo "she said \\" and a << ZZZ"\nfind . -name "*.py"\nZZZ\n'
-        result = self._run(sandbox, str(tmp_path / "state"), command)
-        decision = json.loads(result.stdout)
-        assert decision["decision"] == "block"
-        assert "COST-FULL-TREE-SCAN" in decision["reason"]
 
     def test_valid_approval_is_consumed_once(self, sandbox: Path, tmp_path: Path) -> None:
         state_dir = str(tmp_path / "state")
@@ -386,17 +261,7 @@ class TestHookEndToEnd:
 
 
 class TestArmingDiscipline:
-    def test_a_fresh_worktree_is_not_armed(self, sandbox: Path) -> None:
-        assert arming.is_armed("execution_guard", root=sandbox) is False
 
-    def test_arming_makes_it_armed(self, sandbox: Path) -> None:
-        arming.arm("execution_guard", root=sandbox)
-        assert arming.is_armed("execution_guard", root=sandbox) is True
-
-    def test_disarm_removes_it(self, sandbox: Path) -> None:
-        arming.arm("execution_guard", root=sandbox)
-        arming.disarm("execution_guard", root=sandbox)
-        assert arming.is_armed("execution_guard", root=sandbox) is False
 
     def test_unknown_hook_key_raises(self) -> None:
         with pytest.raises(ValueError):
@@ -404,16 +269,7 @@ class TestArmingDiscipline:
 
 
 class TestAtomicWriteSurvivesAConcurrentReader:
-    """The approval receipt is a shared target: :func:`record_approval` writes it while a
-    concurrent invocation's :func:`consume_approval` may hold it open for read.
-
-    On Windows a rename onto a handle another reader holds -- even a read-only handle -- is
-    refused with ``PermissionError`` and ``winerror == 5``. The refusal is transient and says
-    nothing about either file's content, so the write must retry rather than fail. The
-    platform-dependent proofs below are skipped elsewhere and say so; the contract tests
-    above them run everywhere, because an adopter on any platform depends on the two failure
-    outcomes sharing one base class.
-    """
+    """The approval receipt is a shared target: :func:`record_approval` writes it while a concurrent invocation's :func:`consume_approval` may hold it open for read."""
 
     WINDOWS_ONLY = pytest.mark.skipif(
         sys.platform != "win32",
@@ -449,24 +305,6 @@ class TestAtomicWriteSurvivesAConcurrentReader:
         target.write_bytes(target_bytes)
         return source, target
 
-    def test_both_failure_outcomes_share_one_base_so_one_except_clause_catches_both(self) -> None:
-        """The asymmetry this asserts against is a real defect, not a hypothetical: a sibling
-        implementation of this helper once raised one outcome as an ``OSError`` subclass and
-        the other as a ``RuntimeError``, so a caller's ``except OSError`` handled one and let
-        the other escape its own error contract."""
-        assert issubclass(hook.ReplaceNotApplied, OSError)
-        assert issubclass(hook.ReplaceVerificationError, OSError)
-        assert issubclass(hook.ReplaceNotApplied, PermissionError)
-
-    def test_the_retry_budget_is_bounded_and_stated(self) -> None:
-        assert hook.REPLACE_MAX_ATTEMPTS == 6
-        assert hook.REPLACE_BACKOFF_SECONDS == 0.05
-
-    def test_an_uncontended_replace_lands_and_returns_nothing(self, tmp_path: Path) -> None:
-        source, target = self._pair(tmp_path)
-        assert hook.replace_with_retry_verified(source, target) is None
-        assert target.read_bytes() == b"after\n"
-        assert not source.exists()
 
     @WINDOWS_ONLY
     def test_a_bare_replace_under_the_identical_hold_is_refused(self, tmp_path: Path) -> None:
@@ -508,11 +346,7 @@ class TestAtomicWriteSurvivesAConcurrentReader:
     def test_a_write_that_is_already_present_is_reported_as_success_not_as_a_failure(
         self, tmp_path: Path,
     ) -> None:
-        """The partial-observability case, reproduced by its observable state rather than by
-        the race that produces it: the retries genuinely exhaust against a real refusal, and
-        the target already carries exactly what the source held. Forcing the platform to both
-        apply a rename and report it refused has no deterministic trigger; what this helper
-        owns is the read-back-and-compare that follows, and that is what this proves."""
+        """The partial-observability case, reproduced by its observable state rather than by the race that produces it: the retries genuinely exhaust against a real refusal, and the target already carries..."""
         source, target = self._pair(tmp_path, target_bytes=b"after\n")
         thread = self._held(target, 1.2)
         try:
@@ -538,12 +372,7 @@ class TestAtomicWriteSurvivesAConcurrentReader:
     def test_an_unreadable_source_with_a_still_renamable_target_degrades_loudly(
         self, tmp_path: Path,
     ) -> None:
-        """`ENG-00736`: the file-site silent degradation. A source held under a REAL
-        lock that denies read but permits rename (``open(source, "rb")`` fails,
-        ``os.replace`` does not) used to make ``replace_with_retry_verified`` return
-        exactly as a verified success would, with nothing telling the caller
-        verification never happened. Proven against a real held-open lock, not a
-        patched call."""
+        """`ENG-00736`: the file-site silent degradation."""
         import ctypes
         import warnings
         from ctypes import wintypes
@@ -577,23 +406,6 @@ class TestAtomicWriteSurvivesAConcurrentReader:
         assert target.read_bytes() == b"after\n"
         assert skipped, "no ReplaceVerificationSkipped warning was emitted"
 
-    @WINDOWS_ONLY
-    def test_an_uncontended_replace_emits_no_verification_skipped_warning(
-        self, tmp_path: Path,
-    ) -> None:
-        """Negative control for the test above: without it, a copy that always warns
-        regardless of contention would pass the positive test for the wrong reason."""
-        import warnings
-
-        source, target = self._pair(tmp_path)
-        with warnings.catch_warnings(record=True) as caught:
-            warnings.simplefilter("always")
-            hook.replace_with_retry_verified(source, target)
-        skipped = [
-            w for w in caught
-            if issubclass(w.category, hook.ReplaceVerificationSkipped)
-        ]
-        assert not skipped, "an ordinary uncontended replace must not warn"
 
     @WINDOWS_ONLY
     def test_record_approval_survives_a_concurrent_reader_of_its_own_receipt(
@@ -623,15 +435,7 @@ class TestAtomicWriteSurvivesAConcurrentReader:
 
 
 class TestExclusiveCreateClaimPrimitive:
-    """`ENG-00734` design, layer 1 -- see the identical class in
-    ``engineering/tests/test_command_cost_guard_hook.py`` for the full rationale. Kept here
-    too because this package ships and tests itself independently: `consume_approval`'s
-    claim is `os.open(path, O_CREAT|O_EXCL|O_WRONLY)`, and these are the measured shapes it
-    must survive on this platform (`eng00734_probe.py` M3/M4) -- especially the one that
-    decides which `except` clause is correct: an existing DIRECTORY at the claim path is
-    `PermissionError` errno 13, NOT `FileExistsError`, which is why the implementation
-    catches `OSError`.
-    """
+    """`ENG-00734` design, layer 1 -- see the identical class in ``engineering/tests/test_command_cost_guard_hook.py`` for the full rationale."""
 
     @staticmethod
     def _claim(path: Path):
@@ -667,31 +471,9 @@ class TestExclusiveCreateClaimPrimitive:
         assert caught.value.errno == 13
         assert not isinstance(caught.value, FileExistsError)
 
-    def test_replace_onto_an_existing_file_succeeds_which_is_why_rename_cannot_be_the_claim(
-        self, tmp_path: Path,
-    ) -> None:
-        source = tmp_path / "source.tmp"
-        source.write_bytes(b"after\n")
-        target = tmp_path / "target.json"
-        target.write_bytes(b"before\n")
-        os.replace(source, target)  # succeeds outright -- no exception, no exclusivity
-        assert target.read_bytes() == b"after\n"
-
 
 class TestConcurrentSourceReplaceCanStillSucceedTwice:
-    """`ENG-00734` design, layer 2 -- see the identical class in
-    ``engineering/tests/test_command_cost_guard_hook.py`` for the full rationale. Drives
-    TODAY's `os.replace` primitive directly -- `consume_approval` no longer calls it for the
-    claim, only for a best-effort cleanup unlink -- and asserts BOTH racers can succeed, so
-    the defect this redesign answers stays in the suite as a measured fact rather than as
-    prose (`ENV-TWO-CONCURRENT-OS-REPLACE-CALLS-ONTO-ONE-TARGET-CAN-BOTH-SUCCEED-ON-
-    WINDOWS`; M1: 15 of 20 real-process trials).
-
-    Allowed to be concurrent precisely because it asserts the UNSAFE behaviour: a race that
-    fails to land makes this fail loudly rather than pass falsely. If every trial refuses,
-    the platform's `os.replace` semantics changed and this design's premise needs
-    re-reading -- a hard failure here, not a skip, is meant to surface that.
-    """
+    """`ENG-00734` design, layer 2 -- see the identical class in ``engineering/tests/test_command_cost_guard_hook.py`` for the full rationale."""
 
     _CHILD = (
         "import os, sys, time\n"

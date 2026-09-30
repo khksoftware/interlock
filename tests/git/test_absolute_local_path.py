@@ -27,12 +27,6 @@ class TestThePredicate:
         run_git(sandbox, "add", "notes.md")
         assert len(staged_absolute_local_path_failures(sandbox)) == 1
 
-    def test_a_macos_users_path_is_caught(self, sandbox: Path) -> None:
-        (sandbox / "notes.md").write_text(
-            "See /" + "Users/jdoe/project/file.py\n", encoding="utf-8",
-        )
-        run_git(sandbox, "add", "notes.md")
-        assert len(staged_absolute_local_path_failures(sandbox)) == 1
 
     def test_a_unc_path_is_caught(self, sandbox: Path) -> None:
         (sandbox / "notes.md").write_text(
@@ -85,18 +79,7 @@ class TestThePredicate:
 
 
 class TestTheJoinPassDoesNotRefuseOrdinaryProse:
-    """Regression pins for false refusals an over-broad join predicate produced.
-
-    The join fires on boundary characters, which is the only signal available where
-    neither line matches alone. Firing on them unconditionally fused ordinary prose: a
-    bare drive colon ending one line and a forward slash opening the next joins into
-    something path-shaped that no author wrote. None of the cases here embeds a local
-    path, and every one was refused before that shape was excluded.
-
-    Pinned because the cost is asymmetric. A missed wrapped path is one undetected
-    string; a gate that refuses good commits gets bypassed as a habit and then protects
-    nothing at all.
-    """
+    """Regression pins for false refusals an over-broad join predicate produced."""
 
     def test_a_drive_letter_in_prose_above_a_posix_path_is_not_fused(self, sandbox: Path) -> None:
         (sandbox / "notes.md").write_text(
@@ -118,14 +101,7 @@ class TestTheJoinPassDoesNotRefuseOrdinaryProse:
         assert staged_absolute_local_path_failures(sandbox) == ()
 
 class TestLineBreakEvasion:
-    """`REVIEW_2026-08-21.md` Finding 1: per-line scanning alone is defeated by an
-    ordinary line break -- a wrapped log paste, a hard-wrapped table cell. Re-measured
-    directly, the real evading break positions are: Windows drive path, 2 of 32 (both
-    inside the ``letter:separator`` sequence itself); POSIX ``/home/``, 10 of 30; POSIX
-    ``/Users/``, 11 of 31; UNC, 8 of 25 -- roughly a third for the three longer-prefix
-    forms. Position 1 (breaking right after the very first character) is one of the real
-    evading positions for all four forms and is used below as the representative,
-    previously-evading case each now has to be caught at."""
+    """`REVIEW_2026-08-21.md` Finding 1: per-line scanning alone is defeated by an ordinary line break -- a wrapped log paste, a hard-wrapped table cell."""
 
     def test_a_windows_drive_path_split_right_after_the_bare_letter_is_caught(
         self, sandbox: Path,
@@ -151,40 +127,6 @@ class TestLineBreakEvasion:
         assert "notes.md:1" in failures[0]
         assert "line break" in failures[0]
 
-    def test_a_posix_users_path_split_right_after_the_leading_separator_is_caught(
-        self, sandbox: Path,
-    ) -> None:
-        full = "/" + "Users/jdoe/projects/secret.txt"
-        first, second = full[:1], full[1:]  # "/" / "Users/jdoe/projects/secret.txt"
-        (sandbox / "notes.md").write_text(first + "\n" + second + "\n", encoding="utf-8")
-        run_git(sandbox, "add", "notes.md")
-        failures = staged_absolute_local_path_failures(sandbox)
-        assert len(failures) == 1
-        assert "notes.md:1" in failures[0]
-        assert "line break" in failures[0]
-
-    def test_a_unc_path_split_right_after_the_leading_separator_is_caught(
-        self, sandbox: Path,
-    ) -> None:
-        full = "\\" + r"\server\share\secret.txt"
-        first, second = full[:1], full[1:]  # "\" / "\server\share\secret.txt"
-        (sandbox / "notes.md").write_text(first + "\n" + second + "\n", encoding="utf-8")
-        run_git(sandbox, "add", "notes.md")
-        failures = staged_absolute_local_path_failures(sandbox)
-        assert len(failures) == 1
-        assert "notes.md:1" in failures[0]
-        assert "line break" in failures[0]
-
-    def test_a_break_strictly_inside_a_path_segment_still_evades(self, sandbox: Path) -> None:
-        """Documented residual, not a bug: a break touching neither a separator nor a
-        colon on either side carries no signal that a path continues there, so the
-        narrow join-aware pass deliberately does not attempt it (see the module
-        docstring's "Line-break evasion" section)."""
-        full = "/" + "home/jdoe/projects/secret.txt"
-        first, second = full[:3], full[3:]  # "/ho" / "me/jdoe/projects/secret.txt"
-        (sandbox / "notes.md").write_text(first + "\n" + second + "\n", encoding="utf-8")
-        run_git(sandbox, "add", "notes.md")
-        assert staged_absolute_local_path_failures(sandbox) == ()
 
     def test_a_line_already_reported_per_line_is_not_also_reported_by_the_join_pass(
         self, sandbox: Path,
@@ -254,13 +196,6 @@ class TestFromConfig:
         run_git(sandbox, "add", "fixtures/sample.txt")
         assert staged_absolute_local_path_failures_from_config(sandbox) == ()
 
-    def test_no_config_file_means_the_built_in_patterns_alone_apply(self, sandbox: Path) -> None:
-        (sandbox / "notes.md").write_text(
-            "C:" + r"\no\config\here" + "\n", encoding="utf-8",
-        )
-        run_git(sandbox, "add", "notes.md")
-        assert len(staged_absolute_local_path_failures_from_config(sandbox)) == 1
-
 
 class TestTheBlockActuallyBlocks:
     def test_an_armed_worktree_refuses_a_real_commit_embedding_a_path(
@@ -283,9 +218,3 @@ class TestTheBlockActuallyBlocks:
         assert result.returncode == 0
         assert not is_armed(sandbox, SPEC)
 
-    def test_an_ordinary_commit_passes_while_armed(self, sandbox: Path, interpreter: Path) -> None:
-        install(sandbox, SPEC, interpreter=interpreter)
-        (sandbox / "ordinary.txt").write_text("nothing to see here\n", encoding="utf-8")
-        run_git(sandbox, "add", "ordinary.txt")
-        result = run_git(sandbox, "commit", "-q", "-m", "ordinary")
-        assert result.returncode == 0

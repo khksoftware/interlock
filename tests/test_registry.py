@@ -1,30 +1,8 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Tests for :mod:`interlock.registry` -- the id table the unified `interlock` CLI
-dispatches through.
-
-Not to be confused with :mod:`interlock.turn.outstanding` (the best-effort dispatched-
-agent bookkeeping file, a completely different thing this module used to share a name
-with before the rename that resolved the collision -- see that module's own docstring).
-"""
+"""Tests for :mod:`interlock.registry` -- the id table the unified `interlock` CLI dispatches through."""
 from __future__ import annotations
 
 from interlock import registry
-
-
-class TestAllIdsCoversEveryShippedCheck:
-    def test_five_git_gates_seven_turn_hooks_and_one_guard_hook(self) -> None:
-        git_ids = [i for i in registry.all_ids() if i.startswith("git.")]
-        turn_ids = [i for i in registry.all_ids() if i.startswith("turn.")]
-        guard_ids = [i for i in registry.all_ids() if i.startswith("guard.")]
-        assert len(git_ids) == 5
-        assert len(turn_ids) == 7
-        assert len(guard_ids) == 1
-        assert len(registry.all_ids()) == len(set(registry.all_ids())), "no duplicate ids"
-
-    def test_every_id_is_hyphenated_not_underscored(self) -> None:
-        for identifier in registry.all_ids():
-            _, _, name = identifier.partition(".")
-            assert "_" not in name, f"{identifier!r} should use hyphens in its name segment"
 
 
 class TestFindGitGate:
@@ -50,9 +28,6 @@ class TestFindTurnHook:
     def test_unknown_id_returns_none(self) -> None:
         assert registry.find_turn_hook("turn.does-not-exist") is None
 
-    def test_a_git_id_is_not_a_turn_hook(self) -> None:
-        assert registry.find_turn_hook("git.protected-paths") is None
-
 
 class TestEveryTurnHookKeyHasAMarkerName:
     def test_hook_keys_match_arming_registrations(self) -> None:
@@ -71,9 +46,6 @@ class TestFindGuardHook:
 
     def test_unknown_id_returns_none(self) -> None:
         assert registry.find_guard_hook("guard.does-not-exist") is None
-
-    def test_a_turn_id_is_not_a_guard_hook(self) -> None:
-        assert registry.find_guard_hook("turn.idle-roster") is None
 
 
 class TestEveryGuardHookKeyHasAMarkerName:

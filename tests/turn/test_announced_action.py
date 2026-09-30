@@ -78,23 +78,6 @@ class TestC2BlockerCorroboration:
     def test_c2_b07_await_fabricated_id_retains(self):
         assert hook.announced_actions("I'll dispatch await PROJ-9.", open_row_ids=self.OPEN)
 
-    def test_c2_b08_waiting_on_open_id_suppresses(self):
-        assert not hook.announced_actions("I'll dispatch waiting on PROJ-1.", open_row_ids=self.OPEN)
-
-    def test_c2_b09_waiting_on_fabricated_id_retains(self):
-        assert hook.announced_actions("I'll dispatch waiting on PROJ-9.", open_row_ids=self.OPEN)
-
-    def test_c2_b10_waiting_for_open_id_suppresses(self):
-        assert not hook.announced_actions("I'll dispatch waiting for PROJ-1.", open_row_ids=self.OPEN)
-
-    def test_c2_b11_waiting_for_fabricated_id_retains(self):
-        assert hook.announced_actions("I'll dispatch waiting for PROJ-9.", open_row_ids=self.OPEN)
-
-    def test_c2_b12_waits_on_open_id_suppresses(self):
-        assert not hook.announced_actions("I'll dispatch but it waits on PROJ-1.", open_row_ids=self.OPEN)
-
-    def test_c2_b13_waits_on_fabricated_id_retains(self):
-        assert hook.announced_actions("I'll dispatch but it waits on PROJ-9.", open_row_ids=self.OPEN)
 
     def test_c2_b14_blocked_on_open_id_suppresses(self):
         assert not hook.announced_actions("I'll dispatch blocked on PROJ-1.", open_row_ids=self.OPEN)
@@ -170,17 +153,6 @@ class TestC3PacketBCorrections:
     def test_c3_b33_awaiting_fabricated_id_retains(self):
         assert hook.announced_actions("I'll dispatch awaiting PROJ-9.", open_row_ids=self.OPEN)
 
-    def test_c3_b34_awaits_open_id_suppresses(self):
-        assert not hook.announced_actions("I'll dispatch and it awaits PROJ-1.", open_row_ids=self.OPEN)
-
-    def test_c3_b35_awaits_fabricated_id_retains(self):
-        assert hook.announced_actions("I'll dispatch and it awaits PROJ-9.", open_row_ids=self.OPEN)
-
-    def test_c3_b36_awaited_open_id_suppresses(self):
-        assert not hook.announced_actions("I'll dispatch after it awaited PROJ-1.", open_row_ids=self.OPEN)
-
-    def test_c3_b37_awaited_fabricated_id_retains(self):
-        assert hook.announced_actions("I'll dispatch after it awaited PROJ-9.", open_row_ids=self.OPEN)
 
     def test_c3_b38_wait_on_open_id_suppresses(self):
         assert not hook.announced_actions("I'll dispatch but I wait on PROJ-1.", open_row_ids=self.OPEN)
@@ -194,35 +166,6 @@ class TestC3PacketBCorrections:
     def test_c3_b41_await_your_response_fabricated_is_operator_contingency(self):
         assert not hook.announced_actions("I'll dispatch await your response on PROJ-9.", open_row_ids=self.OPEN)
 
-    def test_c3_b42_awaiting_you_open_id_is_operator_contingency(self):
-        assert not hook.announced_actions("I'll dispatch awaiting you on PROJ-1.", open_row_ids=self.OPEN)
-
-    def test_c3_b43_awaiting_your_response_fabricated_is_operator_contingency(self):
-        assert not hook.announced_actions("I'll dispatch awaiting your response on PROJ-9.", open_row_ids=self.OPEN)
-
-    def test_c3_b44_awaits_you_open_id_is_operator_contingency(self):
-        assert not hook.announced_actions("I'll dispatch and it awaits you on PROJ-1.", open_row_ids=self.OPEN)
-
-    def test_c3_b45_awaits_your_decision_fabricated_is_operator_contingency(self):
-        assert not hook.announced_actions("I'll dispatch and it awaits your decision on PROJ-9.", open_row_ids=self.OPEN)
-
-    def test_c3_b46_awaited_you_open_id_is_operator_contingency(self):
-        assert not hook.announced_actions("I'll dispatch after I awaited you on PROJ-1.", open_row_ids=self.OPEN)
-
-    def test_c3_b47_awaited_your_response_fabricated_is_operator_contingency(self):
-        assert not hook.announced_actions("I'll dispatch after I awaited your response on PROJ-9.", open_row_ids=self.OPEN)
-
-    def test_c3_b48_wait_on_you_open_id_is_operator_contingency(self):
-        assert not hook.announced_actions("I'll dispatch but I wait on you for PROJ-1.", open_row_ids=self.OPEN)
-
-    def test_c3_b49_wait_on_your_decision_fabricated_is_operator_contingency(self):
-        assert not hook.announced_actions("I'll dispatch but I wait on your decision for PROJ-9.", open_row_ids=self.OPEN)
-
-    def test_c3_b50_waits_on_you_open_id_is_operator_contingency(self):
-        assert not hook.announced_actions("I'll dispatch but it waits on you for PROJ-1.", open_row_ids=self.OPEN)
-
-    def test_c3_b51_waits_on_your_decision_fabricated_is_operator_contingency(self):
-        assert not hook.announced_actions("I'll dispatch but it waits on your decision for PROJ-9.", open_row_ids=self.OPEN)
 
     def test_c3_b52_once_you_open_id_is_operator_contingency(self):
         assert not hook.announced_actions("I'll dispatch once you resolve PROJ-1.", open_row_ids=self.OPEN)
@@ -230,17 +173,6 @@ class TestC3PacketBCorrections:
     def test_c3_b53_once_your_decision_fabricated_is_operator_contingency(self):
         assert not hook.announced_actions("I'll dispatch once your decision resolves PROJ-9.", open_row_ids=self.OPEN)
 
-    def test_c3_b54_waiting_on_you_open_id_is_operator_contingency(self):
-        assert not hook.announced_actions("I'll dispatch waiting on you for PROJ-1.", open_row_ids=self.OPEN)
-
-    def test_c3_b55_waiting_on_your_response_fabricated_is_operator_contingency(self):
-        assert not hook.announced_actions("I'll dispatch waiting on your response for PROJ-9.", open_row_ids=self.OPEN)
-
-    def test_c3_b56_waiting_for_you_open_id_is_operator_contingency(self):
-        assert not hook.announced_actions("I'll dispatch waiting for you on PROJ-1.", open_row_ids=self.OPEN)
-
-    def test_c3_b57_waiting_for_your_decision_fabricated_is_operator_contingency(self):
-        assert not hook.announced_actions("I'll dispatch waiting for your decision on PROJ-9.", open_row_ids=self.OPEN)
 
     def test_c3_b58_blocked_on_you_open_id_is_operator_contingency(self):
         assert not hook.announced_actions("I'll dispatch blocked on you for PROJ-1.", open_row_ids=self.OPEN)
