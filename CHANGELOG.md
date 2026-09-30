@@ -8,6 +8,36 @@ reminding about, something it did not before) rather than only a Python API.
 
 ## [Unreleased]
 
+## [2.0.1] — 2026-09-29
+
+**PATCH.** No refusal changes, no marker or environment-variable rename, no hook
+stdin/stdout contract change. Installed hooks keep working unchanged after upgrading; to pick up
+the faster `stash_invocation` hook, re-run that gate's install, which now upgrades its own shim in
+place.
+
+- Fixed: `interlock.git.hookkit.install` (and `installation_state`, which backs
+  `interlock status`) used to read an older copy of a gate's OWN solo shim, or an
+  already-composed component belonging to that same gate, as though it were a
+  different gate arriving for the first time, and converted a solo hook into a
+  multi-gate dispatcher on reinstall. Any change to a gate's own shim text would
+  therefore misfile an upgrading adopter's next `install` as a second gate sharing the
+  hook name. `install` and `installation_state` now recognize their own gate by its
+  embedded marker name and upgrade that shim (or component) in place instead. A
+  genuinely different gate still composes exactly as before, and a genuinely foreign
+  hook is still refused exactly as before — neither path changed.
+- Fixed: the `stash_invocation` gate's installed hook now exits before spawning `git`
+  or the gate's own Python module for the `committed` and `aborted`
+  `reference-transaction` phases, which can never refuse — git ignores this hook's
+  exit status for those two phases regardless. A ref-heavy git operation such as
+  `pack-refs` fires this hook once per ref per phase, so this removes two spawns per
+  ref for an outcome that was already fixed. The `prepared` phase, the one phase that
+  can actually refuse, is unaffected.
+
+Adopters get both fixes — the faster stash-invocation hook, and the corrected
+in-place upgrade for any other gate — by re-running `interlock install` for each gate
+they already have installed, which now upgrades an older copy of its own shim in
+place rather than misreading it as a different gate.
+
 ## [2.0.0] — 2026-09-22
 
 **Breaking: the approval receipt's `approved_by` field is renamed to `approved_under`, and

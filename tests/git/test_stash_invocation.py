@@ -1,6 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 from __future__ import annotations
 
+import subprocess
 from pathlib import Path
 
 from interlock.git.hookkit import install, is_armed
@@ -71,3 +72,38 @@ class TestTheBlockActuallyBlocks:
         (sandbox / "README.md").write_text("bypassed\n", encoding="utf-8")
         result = run_git(sandbox, "stash")
         assert result.returncode == 0
+
+
+class TestTheInertPhasesSpawnNothing:
+    """`committed` and `aborted` can never refuse -- git ignores the hook's exit status then,
+    and the module returns no refusal for any phase but `prepared` -- so the shim exits before
+    spawning git or python. Proved against the real `SPEC.shim` text with a recorded
+    "interpreter" that leaves a sentinel file if it is ever reached; the `prepared` case proves
+    the sentinel mechanism itself works, so the negative checks cannot pass vacuously."""
+
+    def _run_shim(self, tmp_path: Path, phase: str) -> tuple[int, bool]:
+        repo = tmp_path / "repo"
+        subprocess.run(["git", "init", "-q", str(repo)], check=True)
+        hook = repo / ".git" / "hooks" / "reference-transaction"
+        hook.parent.mkdir(parents=True, exist_ok=True)
+        hook.write_text(SPEC.shim, encoding="utf-8", newline="")
+        sentinel = tmp_path / "reached-interpreter"
+        fake = tmp_path / "fake_interpreter.sh"
+        fake.write_text(
+            f"#!/bin/sh\ntouch '{sentinel.as_posix()}'\nexit 0\n", encoding="utf-8", newline="",
+        )
+        fake.chmod(0o755)
+        (repo / ".git" / SPEC.marker_name).write_text(fake.as_posix() + "\n", encoding="utf-8")
+        result = subprocess.run(
+            ["sh", str(hook), phase], input=b"", cwd=str(repo), capture_output=True, timeout=30,
+        )
+        return result.returncode, sentinel.exists()
+
+    def test_committed_exits_zero_without_reaching_the_interpreter(self, tmp_path: Path) -> None:
+        assert self._run_shim(tmp_path, "committed") == (0, False)
+
+    def test_aborted_exits_zero_without_reaching_the_interpreter(self, tmp_path: Path) -> None:
+        assert self._run_shim(tmp_path, "aborted") == (0, False)
+
+    def test_prepared_still_reaches_the_interpreter(self, tmp_path: Path) -> None:
+        assert self._run_shim(tmp_path, "prepared") == (0, True)

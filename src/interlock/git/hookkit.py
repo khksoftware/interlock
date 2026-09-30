@@ -66,7 +66,13 @@ shaped; refusing an unrecognized foreign hook is unchanged.
   directory in turn, stopping at the first one that refuses. No gate's own dispatch logic
   is re-derived, parsed, or reconstructed from another gate's shim text to do this --
   every component file is either an untouched copy of a real, tested solo shim, or the
-  fixed dispatcher constant.
+  fixed dispatcher constant. **This composing step is scoped to a shim recognized as
+  belonging to a DIFFERENT gate** (its embedded marker name differs from the installing
+  spec's own): an existing solo shim or composed component recognized as an OLDER copy of
+  THIS SAME gate's own shim (identical marker name) is upgraded in place instead --
+  otherwise any change to a gate's own shim text would misread its own prior installation
+  as a different gate and convert an upgrading adopter's hook into a dispatcher on their
+  next `install`, which is not a compose case at all.
 - **A hook already occupied by a genuinely foreign file** (this package never wrote it,
   and its content matches neither a solo shim nor the composed dispatcher) is still
   refused exactly as before -- this package still never silently rewrites content it does
@@ -261,13 +267,17 @@ def installation_state(root: str | Path, spec: GateSpec) -> tuple[bool, str]:
     module's own composing support, a would-be auto-composed) multi-gate hook was
     reported FOREIGN even though it was correctly armed and refusing real bad commits.
 
-    Three ways this reports installed:
+    Four ways this reports installed:
 
     - Byte-identical to ``spec``'s own solo shim -- the ordinary, single-gate case,
       unchanged from before.
     - The hook is :data:`COMPOSED_DISPATCHER_SHIM`, with a component file present for
       this exact gate -- what :func:`install` itself writes when a second gate needs to
       share an occupied hook name.
+    - A recognized Interlock shim whose embedded marker name is this SAME gate's own,
+      but not byte-identical to ``spec.shim`` -- an older copy of this gate's own shim,
+      not a different gate to compose with: a stale shim text must not be misread as
+      another gate and converted into a dispatcher.
     - The hook's own text names both this gate's marker file and its CLI module path --
       the shape a hand-composed shim written per ``docs/INTEGRATION.md`` Section 5
       necessarily has, since that section's own worked example names both explicitly.
@@ -292,6 +302,10 @@ def installation_state(root: str | Path, spec: GateSpec) -> tuple[bool, str]:
             "a composed interlock dispatcher occupies this name, but has no component for "
             "this gate"
         )
+    if _looks_like_an_interlock_shim(existing) and _existing_solo_marker_name(existing) == spec.marker_name:
+        return True, (
+            "installed (an older copy of this gate's own shim -- reinstall to upgrade in place)"
+        )
     if spec.marker_name in existing and spec.cli_module in existing:
         return True, (
             "installed (a hand-composed hook per docs/INTEGRATION.md Section 5 names this "
@@ -313,6 +327,14 @@ def install(root: str | Path, spec: GateSpec, *, interpreter: str | Path) -> tup
     package's OWN gates**, rather than refusing -- see the module docstring's "Composing
     more than one gate onto a shared hook name" section for the full design and why this
     is safe precisely because it only ever happens onto content this package itself wrote.
+
+    **Upgrades an older copy of THIS SAME gate's own shim in place**, whether that older
+    copy is a solo shim occupying the hook name outright or this gate's own component file
+    inside an existing composed dispatcher -- recognized by its embedded marker name
+    matching ``spec.marker_name``. This is not a compose case: composing is reserved for a
+    genuinely different gate, so a gate's own shim-text change on a later release does not
+    get misread as a foreign gate arriving and does not convert an upgrading adopter's hook
+    into a dispatcher.
     """
     root = Path(root)
     interpreter = Path(interpreter)
@@ -336,34 +358,52 @@ def install(root: str | Path, spec: GateSpec, *, interpreter: str | Path) -> tup
         elif existing == COMPOSED_DISPATCHER_SHIM:
             component = _component_path(root, spec)
             if component.is_file():
-                actions.append(f"gate already composed in: {component}")
+                existing_component_bytes = component.read_bytes().decode("utf-8", errors="replace")
+                if existing_component_bytes == spec.shim:
+                    actions.append(f"gate already composed in: {component}")
+                else:
+                    # This gate's own component, written by an older release -- upgrade it
+                    # in place rather than leaving it stale; it is still this gate's own
+                    # file at its own marker name, nothing to recompose.
+                    component.write_text(spec.shim, encoding="utf-8", newline="")
+                    component.chmod(0o755)
+                    actions.append(f"component upgraded in place (older copy of this gate's own shim): {component}")
             else:
                 component.parent.mkdir(parents=True, exist_ok=True)
                 component.write_text(spec.shim, encoding="utf-8", newline="")
                 component.chmod(0o755)
                 actions.append(f"gate composed onto the existing dispatcher: {component}")
         elif _looks_like_an_interlock_shim(existing):
-            # Another of this package's own gates already owns this hook name as a solo
-            # shim. Git dispatches exactly one file per hook name, and this package has
-            # full authority over content it wrote itself -- so convert rather than
-            # refuse: the pre-existing gate's exact bytes move, unmodified, into their own
-            # component file, and this hook name becomes the fixed composed dispatcher.
-            components_dir = _components_dir(root, spec.hook_name)
-            components_dir.mkdir(parents=True, exist_ok=True)
             existing_marker = _existing_solo_marker_name(existing)
-            existing_component = components_dir / existing_marker
-            existing_component.write_text(existing, encoding="utf-8", newline="")
-            existing_component.chmod(0o755)
-            new_component = components_dir / spec.marker_name
-            new_component.write_text(spec.shim, encoding="utf-8", newline="")
-            new_component.chmod(0o755)
-            hook.write_text(COMPOSED_DISPATCHER_SHIM, encoding="utf-8", newline="")
-            hook.chmod(0o755)
-            actions.append(
-                f"hook composed: {hook} is now a multi-gate dispatcher (the pre-existing "
-                f"gate moved, unmodified, to {existing_component}; this gate added at "
-                f"{new_component})"
-            )
+            if existing_marker == spec.marker_name:
+                # An older copy of THIS SAME gate's own solo shim, not another gate --
+                # upgrade it in place. Composing here would be wrong: every later change
+                # to this gate's own shim text would otherwise convert an upgrading
+                # adopter's hook into a multi-gate dispatcher on their very next install.
+                hook.write_text(spec.shim, encoding="utf-8", newline="")
+                hook.chmod(0o755)
+                actions.append(f"hook upgraded in place (older copy of this gate's own shim): {hook}")
+            else:
+                # Another of this package's own gates already owns this hook name as a solo
+                # shim. Git dispatches exactly one file per hook name, and this package has
+                # full authority over content it wrote itself -- so convert rather than
+                # refuse: the pre-existing gate's exact bytes move, unmodified, into their own
+                # component file, and this hook name becomes the fixed composed dispatcher.
+                components_dir = _components_dir(root, spec.hook_name)
+                components_dir.mkdir(parents=True, exist_ok=True)
+                existing_component = components_dir / existing_marker
+                existing_component.write_text(existing, encoding="utf-8", newline="")
+                existing_component.chmod(0o755)
+                new_component = components_dir / spec.marker_name
+                new_component.write_text(spec.shim, encoding="utf-8", newline="")
+                new_component.chmod(0o755)
+                hook.write_text(COMPOSED_DISPATCHER_SHIM, encoding="utf-8", newline="")
+                hook.chmod(0o755)
+                actions.append(
+                    f"hook composed: {hook} is now a multi-gate dispatcher (the pre-existing "
+                    f"gate moved, unmodified, to {existing_component}; this gate added at "
+                    f"{new_component})"
+                )
         else:
             raise GateError(
                 f"a {spec.hook_name} hook that is not this shim is already installed at "

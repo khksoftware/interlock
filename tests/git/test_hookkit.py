@@ -201,6 +201,85 @@ class TestComposingTwoPreCommitGatesOntoOneSharedHook:
             assert "FOREIGN" not in detail
 
 
+class TestInstallUpgradesItsOwnOlderShimInPlace:
+    """`install` used to read an older copy of THIS SAME gate's own solo shim as though it
+    were a different gate's hook and converted it into a composed dispatcher -- so any
+    change to a gate's own shim text would convert an upgrading adopter's hook on their
+    very next `install`. It now recognizes its own gate (same embedded marker name) and
+    upgrades in place instead, for both a solo shim and a component already living inside
+    an existing composed dispatcher. A genuinely different gate still composes exactly as
+    before (`TestInstallComposesAutomatically`), and a genuinely foreign hook is still
+    refused exactly as before (`test_a_genuinely_foreign_hook_is_still_refused_not_
+    clobbered`)."""
+
+    def test_a_stale_solo_shim_of_the_same_gate_is_upgraded_not_composed(
+        self, sandbox: Path, interpreter: Path,
+    ) -> None:
+        hook = sandbox / ".git" / "hooks" / "pre-commit"
+        hook.parent.mkdir(parents=True, exist_ok=True)
+        stale_shim = render_shim(
+            marker_name=PROTECTED_PATHS_SPEC.marker_name, hook_name="pre-commit",
+            cli_module=PROTECTED_PATHS_SPEC.cli_module,
+            gate_label="an older label for the same gate",
+        )
+        assert stale_shim != PROTECTED_PATHS_SPEC.shim  # the fixture must actually be stale
+        hook.write_text(stale_shim, encoding="utf-8", newline="")
+        hook.chmod(0o755)
+
+        actions = install(sandbox, PROTECTED_PATHS_SPEC, interpreter=interpreter)
+
+        assert any("upgraded in place" in action for action in actions), actions
+        assert hook.read_bytes().decode("utf-8") == PROTECTED_PATHS_SPEC.shim
+        components = sandbox / ".git" / "hooks" / "interlock-composed" / "pre-commit"
+        assert not components.exists()
+
+    def test_a_stale_component_of_the_same_gate_inside_a_dispatcher_is_upgraded_in_place(
+        self, sandbox: Path, interpreter: Path,
+    ) -> None:
+        install(sandbox, PROTECTED_PATHS_SPEC, interpreter=interpreter)
+        install(sandbox, IDENTITY_SPEC, interpreter=interpreter)
+        component = (
+            sandbox / ".git" / "hooks" / "interlock-composed" / "pre-commit"
+            / PROTECTED_PATHS_SPEC.marker_name
+        )
+        other_component = (
+            sandbox / ".git" / "hooks" / "interlock-composed" / "pre-commit" / IDENTITY_SPEC.marker_name
+        )
+        other_component_before = other_component.read_bytes()
+        stale_shim = render_shim(
+            marker_name=PROTECTED_PATHS_SPEC.marker_name, hook_name="pre-commit",
+            cli_module=PROTECTED_PATHS_SPEC.cli_module,
+            gate_label="an older label for the same gate",
+        )
+        component.write_text(stale_shim, encoding="utf-8", newline="")
+
+        actions = install(sandbox, PROTECTED_PATHS_SPEC, interpreter=interpreter)
+
+        assert any("upgraded in place" in action for action in actions), actions
+        assert component.read_bytes().decode("utf-8") == PROTECTED_PATHS_SPEC.shim
+        # The dispatcher itself and the other gate's own component are untouched.
+        dispatcher = sandbox / ".git" / "hooks" / "pre-commit"
+        assert dispatcher.read_bytes().decode("utf-8") == COMPOSED_DISPATCHER_SHIM
+        assert other_component.read_bytes() == other_component_before
+
+    def test_status_recognizes_a_stale_solo_shim_of_the_same_gate(
+        self, sandbox: Path, interpreter: Path,
+    ) -> None:
+        hook = sandbox / ".git" / "hooks" / "pre-commit"
+        hook.parent.mkdir(parents=True, exist_ok=True)
+        stale_shim = render_shim(
+            marker_name=PROTECTED_PATHS_SPEC.marker_name, hook_name="pre-commit",
+            cli_module=PROTECTED_PATHS_SPEC.cli_module,
+            gate_label="an older label for the same gate",
+        )
+        hook.write_text(stale_shim, encoding="utf-8", newline="")
+
+        installed, detail = installation_state(sandbox, PROTECTED_PATHS_SPEC)
+
+        assert installed, detail
+        assert "older copy" in detail
+
+
 class TestGateSpecItself:
     def test_is_frozen(self) -> None:
         spec = GateSpec(

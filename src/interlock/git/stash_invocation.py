@@ -90,7 +90,14 @@ HOOK_SHIM = f"""#!/bin/sh
 # having loaded nothing.
 #
 # git invokes this hook as `reference-transaction <phase>` with the batch of ref updates on
-# stdin. Only a non-zero exit during the `prepared` phase has any effect.
+# stdin. Only a non-zero exit during the `prepared` phase has any effect -- `committed` and
+# `aborted` report on an already-decided outcome and git ignores this hook's exit status
+# then, so those two phases exit here, before anything is spawned: each firing otherwise
+# paid a git and a python start for an outcome already known, and a ref-heavy operation such
+# as pack-refs fires this hook once per ref per phase.
+case "$1" in
+    committed|aborted) exit 0 ;;
+esac
 set -e
 gate_dir="$(git rev-parse --git-dir)"
 gate_marker="$gate_dir/{GATE_MARKER_NAME}"
